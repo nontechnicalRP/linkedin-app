@@ -63,7 +63,7 @@ ${transcript}`;
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-3-opus-20240229',
+        model: 'claude-opus-4-5-20251101',
         max_tokens: 2000,
         messages: [{
           role: 'user',

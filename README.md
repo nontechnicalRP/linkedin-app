@@ -2,6 +2,12 @@
 
 A simple, elegant web application that transforms call transcripts into engaging LinkedIn posts using Claude AI.
 
+## ⚠️ Important: Deployment Required
+
+**This app requires deployment to Netlify (free) to work properly.** You cannot simply open the HTML file in your browser due to CORS security restrictions with the Claude API.
+
+**👉 [See DEPLOY.md for step-by-step deployment instructions](./DEPLOY.md)**
+
 ## ✨ Features
 
 - **Smart Analysis**: Uses Claude's AI to extract the most insightful points from your transcripts
@@ -9,49 +15,47 @@ A simple, elegant web application that transforms call transcripts into engaging
 - **Editable Output**: Tweak the generated post to add your personal touch
 - **Copy to Clipboard**: One-click copying for easy pasting into LinkedIn
 - **Google Docs Export**: Export to Google Docs for further editing
-- **Secure**: API key stored locally in your browser only
-- **Zero Dependencies**: Pure HTML, CSS, and JavaScript - no build tools required
+- **Secure Backend**: Netlify Functions keep your API key safe
+- **No Server Maintenance**: Serverless architecture, free hosting
+
+## 🏗️ Architecture
+
+This app uses a modern serverless architecture:
+
+- **Frontend**: HTML, CSS, JavaScript (runs in your browser)
+- **Backend**: Netlify Functions (handles Claude API calls securely)
+- **Security**: API calls are proxied through Netlify to avoid CORS issues
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- A modern web browser (Chrome, Firefox, Safari, or Edge)
-- A Claude API key from Anthropic ([Get one here](https://console.anthropic.com/))
+- A GitHub account
+- A Netlify account (free) - [Sign up here](https://netlify.com)
+- A Claude API key from Anthropic - [Get one here](https://console.anthropic.com/)
 
-### Setup Instructions
+### Deployment Steps (5 minutes)
 
-1. **Get Your Claude API Key**
-   - Visit [https://console.anthropic.com/](https://console.anthropic.com/)
-   - Sign up or log in to your account
-   - Navigate to API Keys
-   - Create a new API key
-   - Copy the key (it starts with `sk-ant-api03-...`)
+1. **Fork/Clone this repository** to your GitHub account
 
-2. **Download or Clone This Repository**
-   ```bash
-   git clone <repository-url>
-   cd linkedin-app
-   ```
+2. **Deploy to Netlify**
+   - Go to https://app.netlify.com/
+   - Click "Add new site" → "Import an existing project"
+   - Connect your GitHub and select this repository
+   - Branch: `claude/transcript-linkedin-converter-CkBsM`
+   - Click "Deploy site"
 
-3. **Open the Application**
-   - Simply open `index.html` in your web browser
-   - You can double-click the file or use the command:
-     ```bash
-     # On macOS
-     open index.html
+3. **Get your Claude API key**
+   - Visit https://console.anthropic.com/
+   - Create an API key
+   - Copy it (starts with `sk-ant-api03-...`)
 
-     # On Linux
-     xdg-open index.html
+4. **Use the app**
+   - Open your Netlify URL
+   - Paste your API key
+   - Start converting transcripts!
 
-     # On Windows
-     start index.html
-     ```
-
-4. **Enter Your API Key**
-   - Paste your Claude API key in the API Key field
-   - It will be saved in your browser's local storage for future use
-   - Your API key never leaves your browser and is never sent anywhere except directly to Anthropic's API
+**📖 For detailed instructions, see [DEPLOY.md](./DEPLOY.md)**
 
 ## 📖 How to Use
 

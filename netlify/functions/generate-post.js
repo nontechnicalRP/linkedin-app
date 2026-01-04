@@ -75,10 +75,11 @@ ${transcript}`;
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
+      console.error('Anthropic API Error:', JSON.stringify(errorData, null, 2));
       return {
         statusCode: response.status,
         body: JSON.stringify({
-          error: errorData.error?.message || `API request failed: ${response.status}`
+          error: errorData.error?.message || errorData.message || JSON.stringify(errorData) || `API request failed: ${response.status}`
         })
       };
     }

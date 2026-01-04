@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transcript to LinkedIn Post Converter</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📝 Transcript to LinkedIn Post</h1>
+            <p class="subtitle">Transform your call transcripts into engaging LinkedIn content</p>
+        </header>
+
+        <div class="main-content">
+            <!-- API Key Section -->
+            <div class="api-key-section">
+                <label for="apiKey">
+                    <strong>Claude API Key:</strong>
+                    <span class="help-text">(Your key is stored locally in your browser)</span>
+                </label>
+                <div class="api-key-input-group">
+                    <input
+                        type="password"
+                        id="apiKey"
+                        placeholder="sk-ant-api03-..."
+                        autocomplete="off"
+                    >
+                    <button id="toggleApiKey" class="btn-secondary">Show</button>
+                </div>
+            </div>
+
+            <!-- Input Section -->
+            <div class="input-section">
+                <label for="transcript">
+                    <strong>Paste Your Transcript:</strong>
+                </label>
+                <textarea
+                    id="transcript"
+                    placeholder="Paste your call transcript here...&#10;&#10;Example:&#10;Speaker 1: Hey, thanks for joining. I wanted to discuss our new approach to async collaboration.&#10;Speaker 2: Absolutely. I think the key insight is that real-time isn't always better..."
+                    rows="12"
+                ></textarea>
+                <div class="char-count" id="charCount">0 characters</div>
+            </div>
+
+            <!-- Generate Button -->
+            <div class="button-container">
+                <button id="generateBtn" class="btn-primary">
+                    <span class="btn-text">Generate LinkedIn Post</span>
+                    <span class="btn-loading" style="display: none;">
+                        <span class="spinner"></span> Analyzing transcript...
+                    </span>
+                </button>
+            </div>
+
+            <!-- Output Section -->
+            <div class="output-section" id="outputSection" style="display: none;">
+                <div class="output-header">
+                    <label for="output"><strong>Your LinkedIn Post:</strong></label>
+                    <div class="output-actions">
+                        <button id="copyBtn" class="btn-secondary">
+                            📋 Copy to Clipboard
+                        </button>
+                        <button id="exportBtn" class="btn-secondary">
+                            📄 Export to Google Docs
+                        </button>
+                    </div>
+                </div>
+                <textarea
+                    id="output"
+                    rows="15"
+                    placeholder="Your generated LinkedIn post will appear here..."
+                ></textarea>
+                <div class="output-stats" id="outputStats"></div>
+            </div>
+
+            <!-- Success Message -->
+            <div id="successMessage" class="success-message" style="display: none;">
+                ✓ Copied to clipboard!
+            </div>
+        </div>
+
+        <footer>
+            <div class="tips">
+                <h3>Tips for Best Results:</h3>
+                <ul>
+                    <li>Include speaker labels in your transcript (Speaker 1:, Speaker 2:, etc.)</li>
+                    <li>Longer transcripts (500+ words) typically generate better insights</li>
+                    <li>Remove any sensitive or confidential information before pasting</li>
+                    <li>Edit the generated post to add your personal touch</li>
+                </ul>
+            </div>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+Sample Transcript for Testing
+================================
+
+Use this transcript to test the application. Copy and paste it into the input field.
+
+---
+
+Alex: Hey Jamie, thanks for making time. I wanted to pick your brain about something that's been bugging me.
+
+Jamie: Of course! What's on your mind?
+
+Alex: So we've been pushing hard on this "always-on" culture at work. Slack notifications, quick responses, constant availability. But I'm starting to wonder if we're actually hurting productivity rather than helping it.
+
+Jamie: Oh, this is something I've thought about a lot. What made you start questioning it?
+
+Alex: Well, I noticed that my best work happens in the morning when I ignore Slack for two hours. No interruptions, just deep focus. But then I feel guilty because I'm not "responsive" enough.
+
+Jamie: That's the paradox, isn't it? We've conflated responsiveness with productivity. But they're not the same thing at all. In fact, they're often inversely related.
+
+Alex: Exactly! Like, when I'm constantly context switching to answer messages, I'm responsive but I'm not actually getting meaningful work done.
+
+Jamie: Here's the thing nobody talks about: deep work requires sustained attention. Every time you switch contexts, there's a cognitive cost. Research shows it can take 15-20 minutes to fully re-engage with complex work after an interruption.
+
+Alex: So if I'm getting interrupted every 10 minutes...
+
+Jamie: You never actually reach deep focus. You're perpetually in that warm-up phase. It's like trying to boil water but turning down the heat every few minutes. The water never boils.
+
+Alex: That's a great analogy. So how do you handle this on your team?
+
+Jamie: We implemented "focus blocks." Everyone has at least two hours each morning where they're not expected to respond to anything unless it's literally on fire. No meetings, no Slack, nothing.
+
+Alex: How did people react to that?
+
+Jamie: Honestly? Initial resistance. People felt like they were being "bad team players." But after two weeks, productivity metrics went up. And more importantly, people reported feeling less stressed and more accomplished.
+
+Alex: What about truly urgent things?
+
+Jamie: We defined what "urgent" actually means. Turns out, almost nothing is actually urgent in the "needs a response in the next 2 hours" sense. We have a system: if something truly can't wait, there's a specific channel for emergencies. It gets used maybe once a month.
+
+Alex: So it's about setting clear expectations.
+
+Jamie: Exactly. And trusting people. We trust our team to check their messages at reasonable intervals. We don't need instant responses. What we need is thoughtful work.
+
+Alex: I love this. I think I'm going to propose something similar for our team. The constant firefighting mode is unsustainable.
+
+Jamie: One more thing: lead by example. If you're the manager and you're sending messages at 11 PM, people will feel pressure to respond. Even if you say "no rush," the behavior sets the culture.
+
+Alex: Good point. Actions speak louder than words.
+
+Jamie: Exactly. Culture is what you do, not what you say.

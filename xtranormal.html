@@ -1361,7 +1361,7 @@ function speakNext() {
 
   speechSynthesis.speak(utt);
 
-  if (isRecording) {
+  if (isRecording && !usingTabAudio) {
     const estimatedDuration = Math.max(1, text.split(/\s+/).length * 0.4) + 0.3;
     synthesizeVoice(text, idx, estimatedDuration);
   }
@@ -1589,18 +1589,6 @@ function startRecordAudio() {
   recMasterComp.attack.value = 0.002;
   recMasterComp.release.value = 0.1;
   recMasterComp.connect(recAudioDest);
-
-  const t = recAudioCtx.currentTime + 0.1;
-  [520, 780].forEach((freq, i) => {
-    const o = recAudioCtx.createOscillator();
-    const g = recAudioCtx.createGain();
-    o.type = 'sine'; o.frequency.value = freq;
-    g.gain.setValueAtTime(0, t + i * 0.13);
-    g.gain.linearRampToValueAtTime(0.35, t + i * 0.13 + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.13 + 0.16);
-    o.connect(g); g.connect(recMasterComp);
-    o.start(t + i * 0.13); o.stop(t + i * 0.13 + 0.18);
-  });
 }
 
 function stopRecordAudio() {
@@ -1662,12 +1650,12 @@ function synthesizeVoice(text, charIdx, durationSec) {
   });
 }
 
-function toggleRecording() {
+let usingTabAudio = false; // true when real TTS audio captured via getDisplayMedia
+
+async function toggleRecording() {
   if (isRecording) { finishRecording(); return; }
 
   const recCanvas = document.getElementById('record-canvas');
-  RC.start();
-  startRecordAudio();
 
   const mimeType = pickMime([
     'video/webm;codecs=vp9,opus',
@@ -1678,15 +1666,38 @@ function toggleRecording() {
   ]);
   const fileExt = mimeType.startsWith('video/webm') ? 'webm' : 'mov';
 
-  // Combine canvas video + Web Audio destination into one stream for MediaRecorder
+  // ── Try to capture real TTS voices via tab audio ──────────────────────────
+  let tabAudioTrack = null;
+  usingTabAudio = false;
+  try {
+    setRecordStatus('📋 Select THIS TAB in the dialog and check "Share tab audio" to capture voices…');
+    const displayStream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,  // Chrome requires video:true
+      audio: { echoCancellation: false, noiseSuppression: false, sampleRate: 48000 },
+      preferCurrentTab: true  // Chrome 107+: pre-selects current tab
+    });
+    // Stop the screen video track — we use canvas for video
+    displayStream.getVideoTracks().forEach(t => t.stop());
+    tabAudioTrack = displayStream.getAudioTracks()[0] || null;
+    if (tabAudioTrack) usingTabAudio = true;
+  } catch (e) {
+    // User cancelled or browser doesn't support — fall through to synth
+  }
+
+  // ── Set up Web Audio synthesis (used if no tab audio, or as fallback) ─────
+  startRecordAudio();
+
+  RC.start();
   const canvasStream = recCanvas.captureStream(30);
-  const audioTrack = recAudioDest.stream.getAudioTracks()[0];
+  const audioTrack = usingTabAudio ? tabAudioTrack : recAudioDest.stream.getAudioTracks()[0];
+
   const recStream = new MediaStream([
     ...canvasStream.getVideoTracks(),
     ...(audioTrack ? [audioTrack] : [])
   ]);
 
-  setRecordStatus(`🔴 Recording (${mimeType}) · ${audioTrack ? 'audio ✓' : 'video only'}`);
+  const audioDesc = usingTabAudio ? 'real voices ✓' : (audioTrack ? 'synth audio ✓' : 'video only');
+  setRecordStatus(`🔴 Recording · ${audioDesc}`);
 
   mediaRecorder = new MediaRecorder(recStream, { mimeType });
   recordedChunks = [];
@@ -1722,7 +1733,6 @@ function toggleRecording() {
   const btn = document.getElementById('btn-record');
   btn.classList.add('recording');
   btn.innerHTML = '<span class="rec-dot"></span> Stop & Save Early';
-  // status already set above with mime/audio-track info
 
   // Auto-start playback
   handleStop();

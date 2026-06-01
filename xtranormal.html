@@ -1520,30 +1520,51 @@ async function toggleRecording() {
   RC.start();
   const canvasStream = document.getElementById('record-canvas').captureStream(30);
 
+  // Capture tab audio — user must pick this tab and check "Share tab audio"
   let audioTracks = [];
-  setRecordStatus('☝️ Optional: select this tab + check "Share tab audio" for voice, or click Cancel for video-only');
+  setRecordStatus('In the dialog: pick THIS TAB → tick "Share tab audio" → click Share');
   try {
     const ds = await navigator.mediaDevices.getDisplayMedia({
-      video: true, audio: true, preferCurrentTab: true
+      video: true,
+      audio: { echoCancellation: false, noiseSuppression: false },
+      preferCurrentTab: true,
+      selfBrowserSurface: 'include'
     });
     audioTracks = ds.getAudioTracks();
     ds.getVideoTracks().forEach(t => t.stop());
-  } catch (e) { /* user cancelled or not supported - video-only */ }
+  } catch (e) { /* cancelled — continue without audio */ }
+
+  if (!audioTracks.length) {
+    setRecordStatus('⚠️ No audio — to add voices, stop and try again, checking "Share tab audio"');
+    await new Promise(r => setTimeout(r, 1500));
+  }
+
+  // Try to get a real MP4 codec; always save as .mov regardless
+  const mimeType = pickMime([
+    'video/mp4;codecs=h264,aac',
+    'video/mp4;codecs=avc1,mp4a.40.2',
+    'video/mp4;codecs=avc1',
+    'video/mp4',
+    'video/webm;codecs=h264,opus',
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm'
+  ]);
 
   const combined = new MediaStream([...canvasStream.getVideoTracks(), ...audioTracks]);
-  const mimeType = pickMime(['video/mp4;codecs=avc1,mp4a.40.2','video/mp4','video/webm;codecs=vp9,opus','video/webm']);
-  const ext = mimeType.startsWith('video/mp4') ? 'mov' : 'webm';
-
   mediaRecorder = new MediaRecorder(combined, { mimeType });
   recordedChunks = [];
   mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
   mediaRecorder.onstop = () => {
     RC.stop();
     audioTracks.forEach(t => t.stop());
+    // Always name .mov — MP4-encoded files open in QuickTime; WebM-encoded
+    // files open in Chrome/Firefox/VLC if QuickTime doesn't recognise them.
     const blob = new Blob(recordedChunks, { type: mimeType });
-    downloadBlob(blob, 'sceneforge-movie.' + ext);
-    setRecordStatus('✅ Saved as sceneforge-movie.' + ext);
-    setTimeout(() => setRecordStatus(''), 4000);
+    downloadBlob(blob, 'sceneforge-movie.mov');
+    const hasAudio = audioTracks.length > 0;
+    setRecordStatus('✅ sceneforge-movie.mov downloaded' + (hasAudio ? ' with audio' : ' — video only (no audio was captured)'));
+    setTimeout(() => setRecordStatus(''), 6000);
   };
 
   mediaRecorder.start(100);
@@ -1552,7 +1573,7 @@ async function toggleRecording() {
   const btn = document.getElementById('btn-record');
   btn.classList.add('recording');
   btn.innerHTML = '<span class="rec-dot"></span> Stop & Save Early';
-  setRecordStatus('🔴 Recording' + (audioTracks.length ? ' with audio' : ' (video only)') + ' — will auto-save when scene ends');
+  setRecordStatus('🔴 Recording' + (audioTracks.length ? ' with audio ✓' : ' — video only') + ' · auto-saves when scene ends');
 
   // Auto-start playback
   handleStop();

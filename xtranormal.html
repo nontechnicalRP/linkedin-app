@@ -1619,57 +1619,36 @@ function synthesizeVoice(text, charIdx, durationSec) {
   const words = text.trim().split(/\s+/).filter(Boolean);
   const wordDur = durationSec / Math.max(words.length, 1);
   const now = recAudioCtx.currentTime;
-
-  // Output to both recording AND speakers so you hear what's captured
-  const out = [recMasterComp, recAudioCtx.destination];
-
   const pitchSteps = [1, 1.08, 0.95, 1.05, 0.92, 1.12, 0.97];
 
-  words.forEach((word, i) => {
+  words.forEach((_, i) => {
     const t = now + i * wordDur;
-    const dur = wordDur * 0.78;
-    const syllables = Math.max(1, Math.ceil(word.length / 3));
-    const sylDur = dur / syllables;
+    const osc = recAudioCtx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.value = pitch * pitchSteps[i % pitchSteps.length];
 
-    for (let s = 0; s < syllables; s++) {
-      const st = t + s * sylDur;
-      const pMul = pitchSteps[(i + s) % pitchSteps.length];
+    const f1 = recAudioCtx.createBiquadFilter();
+    f1.type = 'bandpass';
+    f1.frequency.value = charIdx === 0 ? 650 : 700;
+    f1.Q.value = 8;
 
-      // ── Voiced carrier (sawtooth → formant filters) ──
-      const osc = recAudioCtx.createOscillator();
-      osc.type = 'sawtooth';
-      osc.frequency.value = pitch * pMul;
-      // F1 + F2 in parallel
-      const f1 = recAudioCtx.createBiquadFilter();
-      f1.type = 'bandpass'; f1.frequency.value = charIdx === 0 ? 650 : 700; f1.Q.value = 10;
-      const f2 = recAudioCtx.createBiquadFilter();
-      f2.type = 'bandpass'; f2.frequency.value = charIdx === 0 ? 1100 : 2100; f2.Q.value = 10;
-      const vGain = recAudioCtx.createGain();
-      vGain.gain.setValueAtTime(0, st);
-      vGain.gain.linearRampToValueAtTime(0.32, st + 0.02);
-      vGain.gain.setValueAtTime(0.26, st + sylDur * 0.55);
-      vGain.gain.linearRampToValueAtTime(0, st + sylDur * 0.90);
-      osc.connect(f1); osc.connect(f2);
-      f1.connect(vGain); f2.connect(vGain);
-      out.forEach(o => vGain.connect(o));
-      osc.start(st); osc.stop(st + sylDur);
+    const f2 = recAudioCtx.createBiquadFilter();
+    f2.type = 'bandpass';
+    f2.frequency.value = charIdx === 0 ? 1100 : 2100;
+    f2.Q.value = 8;
 
-      // ── Noise burst at syllable onset (consonant feel) ──
-      const bufSize = recAudioCtx.sampleRate * 0.06;
-      const buf = recAudioCtx.createBuffer(1, bufSize, recAudioCtx.sampleRate);
-      const d = buf.getChannelData(0);
-      for (let k = 0; k < bufSize; k++) d[k] = Math.random() * 2 - 1;
-      const ns = recAudioCtx.createBufferSource();
-      ns.buffer = buf;
-      const nfilt = recAudioCtx.createBiquadFilter();
-      nfilt.type = 'bandpass'; nfilt.frequency.value = 2800; nfilt.Q.value = 1.5;
-      const nGain = recAudioCtx.createGain();
-      nGain.gain.setValueAtTime(0.12, st);
-      nGain.gain.linearRampToValueAtTime(0, st + 0.055);
-      ns.connect(nfilt); nfilt.connect(nGain);
-      out.forEach(o => nGain.connect(o));
-      ns.start(st); ns.stop(st + 0.06);
-    }
+    const g = recAudioCtx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.3, t + 0.03);
+    g.gain.setValueAtTime(0.24, t + wordDur * 0.5);
+    g.gain.linearRampToValueAtTime(0, t + wordDur * 0.85);
+
+    osc.connect(f1); osc.connect(f2);
+    f1.connect(g); f2.connect(g);
+    g.connect(recMasterComp); // → recording
+    g.connect(recAudioCtx.destination); // → speakers (hear it while recording)
+    osc.start(t);
+    osc.stop(t + wordDur);
   });
 }
 
@@ -1679,11 +1658,7 @@ function toggleRecording() {
   const recCanvas = document.getElementById('record-canvas');
   RC.start();
   startRecordAudio();
-  const canvasStream = recCanvas.captureStream(30);
-  const audioStream = recAudioDest.stream;
 
-  // webm/opus is Chrome's native MediaRecorder format and reliably captures audio;
-  // mp4 variants often silently drop the audio track
   const mimeType = pickMime([
     'video/webm;codecs=vp9,opus',
     'video/webm;codecs=vp8,opus',
@@ -1693,11 +1668,14 @@ function toggleRecording() {
   ]);
   const fileExt = mimeType.startsWith('video/webm') ? 'webm' : 'mov';
 
-  const combined = new MediaStream([
-    ...canvasStream.getVideoTracks(),
-    ...audioStream.getAudioTracks()
-  ]);
-  mediaRecorder = new MediaRecorder(combined, { mimeType });
+  // Add audio track directly to the canvas stream — more reliable than new MediaStream([...])
+  const canvasStream = recCanvas.captureStream(30);
+  const audioTrack = recAudioDest.stream.getAudioTracks()[0];
+  if (audioTrack) canvasStream.addTrack(audioTrack);
+
+  setRecordStatus(`🔴 Recording (${mimeType}) · ${audioTrack ? 'audio ✓' : 'video only'}`);
+
+  mediaRecorder = new MediaRecorder(canvasStream, { mimeType });
   recordedChunks = [];
   mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
   mediaRecorder.onstop = async () => {
@@ -1706,7 +1684,6 @@ function toggleRecording() {
     try {
       const durationMs = performance.now() - recordingStartTime;
       setRecordStatus('Processing…');
-      // patchMp4Duration only needed for fragmented MP4; WebM has correct duration natively
       const blob = fileExt === 'mov'
         ? await patchMp4Duration(recordedChunks, mimeType, durationMs)
         : new Blob(recordedChunks, { type: mimeType });
@@ -1732,7 +1709,7 @@ function toggleRecording() {
   const btn = document.getElementById('btn-record');
   btn.classList.add('recording');
   btn.innerHTML = '<span class="rec-dot"></span> Stop & Save Early';
-  setRecordStatus('🔴 Recording with audio ✓ · auto-saves when scene ends');
+  // status already set above with mime/audio-track info
 
   // Auto-start playback
   handleStop();

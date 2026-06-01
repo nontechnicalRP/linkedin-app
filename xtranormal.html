@@ -1094,7 +1094,8 @@ const RC = (() => {
     }
   }
 
-  function renderFrame(ts) {
+  function renderFrame() {
+    const ts = performance.now();
     if (!startTime) startTime = ts;
     const elapsed = ts - startTime;
 
@@ -1129,20 +1130,16 @@ const RC = (() => {
     ctx.fillStyle = '#f7734f';
     ctx.fillText((document.getElementById('char2-name').textContent || 'MORGAN').toUpperCase(), 600, bottomY + 20);
 
-    if (rafId !== null) {
-      rafId = requestAnimationFrame(renderFrame);
-    }
   }
 
   return {
     start() {
       startTime = null;
-      rafId = 0; // will be set in renderFrame
-      rafId = requestAnimationFrame(renderFrame);
+      if (rafId) clearInterval(rafId);
+      rafId = setInterval(renderFrame, 1000 / 30); // 30fps via setInterval — not paused by getDisplayMedia dialog
     },
     stop() {
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = null;
+      if (rafId) { clearInterval(rafId); rafId = null; }
     },
     setTalking(idx, text) {
       talkingIdx = idx;

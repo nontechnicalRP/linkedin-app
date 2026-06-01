@@ -1615,53 +1615,62 @@ function playBloop(t) {
 
 function synthesizeVoice(text, charIdx, durationSec) {
   if (!recAudioCtx || !recMasterComp) return;
-  // Pitch: char 0 male ~100 Hz, char 1 female ~170 Hz
-  const pitch = charIdx === 0 ? 100 : 170;
+  const pitch = charIdx === 0 ? 105 : 175;
   const words = text.trim().split(/\s+/).filter(Boolean);
   const wordDur = durationSec / Math.max(words.length, 1);
   const now = recAudioCtx.currentTime;
 
-  // Sawtooth source — rich harmonic series mimics vocal cords
-  const src = recAudioCtx.createOscillator();
-  src.type = 'sawtooth';
-  const pitchSteps = [1, 1.07, 0.96, 1.04, 0.93, 1.10, 0.98];
-  src.frequency.setValueAtTime(pitch, now);
-  words.forEach((_, i) => {
-    src.frequency.setValueAtTime(pitch * pitchSteps[i % pitchSteps.length], now + i * wordDur);
-  });
+  // Output to both recording AND speakers so you hear what's captured
+  const out = [recMasterComp, recAudioCtx.destination];
 
-  // Three parallel formant (bandpass) filters = vocal tract resonances.
-  // Without formants, sawtooth just sounds like a buzz; formants make it voice-like.
-  const formants = charIdx === 0
-    ? [{ f: 650, q: 9 }, { f: 1100, q: 11 }, { f: 2500, q: 13 }]  // male 'ah'
-    : [{ f: 700, q: 9 }, { f: 2100, q: 11 }, { f: 2900, q: 13 }]; // female 'ah'
+  const pitchSteps = [1, 1.08, 0.95, 1.05, 0.92, 1.12, 0.97];
 
-  const masterGain = recAudioCtx.createGain();
-  masterGain.connect(recMasterComp);
-
-  // Per-word amplitude envelope — sharp on/off between words
-  masterGain.gain.setValueAtTime(0, now);
-  words.forEach((_, i) => {
+  words.forEach((word, i) => {
     const t = now + i * wordDur;
-    masterGain.gain.linearRampToValueAtTime(0.28, t + 0.03);
-    masterGain.gain.setValueAtTime(0.22, t + wordDur * 0.5);
-    masterGain.gain.linearRampToValueAtTime(0, t + wordDur * 0.82);
-  });
+    const dur = wordDur * 0.78;
+    const syllables = Math.max(1, Math.ceil(word.length / 3));
+    const sylDur = dur / syllables;
 
-  formants.forEach(({ f, q }) => {
-    const bp = recAudioCtx.createBiquadFilter();
-    bp.type = 'bandpass';
-    bp.frequency.value = f;
-    bp.Q.value = q;
-    const fg = recAudioCtx.createGain();
-    fg.gain.value = 1 / formants.length;
-    src.connect(bp);
-    bp.connect(fg);
-    fg.connect(masterGain);
-  });
+    for (let s = 0; s < syllables; s++) {
+      const st = t + s * sylDur;
+      const pMul = pitchSteps[(i + s) % pitchSteps.length];
 
-  src.start(now);
-  src.stop(now + durationSec + 0.15);
+      // ── Voiced carrier (sawtooth → formant filters) ──
+      const osc = recAudioCtx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.value = pitch * pMul;
+      // F1 + F2 in parallel
+      const f1 = recAudioCtx.createBiquadFilter();
+      f1.type = 'bandpass'; f1.frequency.value = charIdx === 0 ? 650 : 700; f1.Q.value = 10;
+      const f2 = recAudioCtx.createBiquadFilter();
+      f2.type = 'bandpass'; f2.frequency.value = charIdx === 0 ? 1100 : 2100; f2.Q.value = 10;
+      const vGain = recAudioCtx.createGain();
+      vGain.gain.setValueAtTime(0, st);
+      vGain.gain.linearRampToValueAtTime(0.32, st + 0.02);
+      vGain.gain.setValueAtTime(0.26, st + sylDur * 0.55);
+      vGain.gain.linearRampToValueAtTime(0, st + sylDur * 0.90);
+      osc.connect(f1); osc.connect(f2);
+      f1.connect(vGain); f2.connect(vGain);
+      out.forEach(o => vGain.connect(o));
+      osc.start(st); osc.stop(st + sylDur);
+
+      // ── Noise burst at syllable onset (consonant feel) ──
+      const bufSize = recAudioCtx.sampleRate * 0.06;
+      const buf = recAudioCtx.createBuffer(1, bufSize, recAudioCtx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let k = 0; k < bufSize; k++) d[k] = Math.random() * 2 - 1;
+      const ns = recAudioCtx.createBufferSource();
+      ns.buffer = buf;
+      const nfilt = recAudioCtx.createBiquadFilter();
+      nfilt.type = 'bandpass'; nfilt.frequency.value = 2800; nfilt.Q.value = 1.5;
+      const nGain = recAudioCtx.createGain();
+      nGain.gain.setValueAtTime(0.12, st);
+      nGain.gain.linearRampToValueAtTime(0, st + 0.055);
+      ns.connect(nfilt); nfilt.connect(nGain);
+      out.forEach(o => nGain.connect(o));
+      ns.start(st); ns.stop(st + 0.06);
+    }
+  });
 }
 
 function toggleRecording() {

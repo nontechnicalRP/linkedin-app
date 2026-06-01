@@ -797,10 +797,6 @@
       <span class="rec-dot"></span>
       Record Video (.mov)
     </button>
-    <button class="btn btn-record" id="btn-audio" onclick="toggleAudioExport()" style="margin-top:4px">
-      <span class="rec-dot" style="background:#a78bfa"></span>
-      Export Audio (.m4a)
-    </button>
     <div class="status-line" id="record-status" style="min-height:14px;font-size:11px;line-height:1.4;white-space:normal"></div>
   </div>
 
@@ -1153,23 +1149,14 @@ parseScript = function() {
   }
 };
 
-// ── Recording helpers ─────────────────────────────────────────────────────────
+// ── Video Recording (.mov with audio) ─────────────────────────────────────────
 let mediaRecorder = null;
 let recordedChunks = [];
 let isRecording = false;
-let isRecordingAudio = false;
 
 function pickMime(candidates) {
   for (const m of candidates) if (MediaRecorder.isTypeSupported(m)) return m;
   return candidates[candidates.length - 1];
-}
-
-async function captureStream() {
-  return navigator.mediaDevices.getDisplayMedia({
-    video: { frameRate: 30, displaySurface: 'browser' },
-    audio: { echoCancellation: false, noiseSuppression: false, sampleRate: 44100 },
-    preferCurrentTab: true
-  });
 }
 
 function downloadBlob(blob, filename) {
@@ -1180,47 +1167,62 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 15000);
 }
 
-// ── Video (.mov) ──────────────────────────────────────────────────────────────
 async function toggleRecording() {
   if (isRecording) { finishRecording(); return; }
 
-  setRecordStatus('☝️ In the browser dialog: select this tab and check ✅ "Share tab audio"');
+  setRecordStatus('☝️ Select this tab in the dialog and check ✅ "Share tab audio" — then press Play');
   let stream;
   try {
-    stream = await captureStream();
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: 30, displaySurface: 'browser' },
+      audio: { echoCancellation: false, noiseSuppression: false, sampleRate: 44100 },
+      preferCurrentTab: true
+    });
   } catch (e) {
-    setRecordStatus(e.name === 'NotAllowedError' ? '' : 'Screen capture unavailable');
+    setRecordStatus(e.name === 'NotAllowedError' ? '' : 'Screen capture not available in this browser');
     return;
   }
 
+  // Build a combined stream that always has both video and audio tracks
+  const combinedTracks = [...stream.getVideoTracks(), ...stream.getAudioTracks()];
+  if (combinedTracks.length === 0) { setRecordStatus('No tracks captured'); return; }
+  const combined = new MediaStream(combinedTracks);
+
+  const hasAudio = stream.getAudioTracks().length > 0;
+  if (!hasAudio) {
+    setRecordStatus('⚠️ No audio — re-record and check "Share tab audio" in the dialog');
+  }
+
+  // Prefer MP4 with audio codec (saves as .mov); fall back to webm
   const mimeType = pickMime([
     'video/mp4;codecs=avc1,mp4a.40.2',
     'video/mp4;codecs=h264,aac',
     'video/mp4',
     'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
     'video/webm'
   ]);
   const ext = mimeType.startsWith('video/mp4') ? 'mov' : 'webm';
 
-  mediaRecorder = new MediaRecorder(stream, { mimeType });
+  mediaRecorder = new MediaRecorder(combined, { mimeType });
   recordedChunks = [];
   mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
   mediaRecorder.onstop = () => {
     stream.getTracks().forEach(t => t.stop());
     const blob = new Blob(recordedChunks, { type: mimeType });
     downloadBlob(blob, 'sceneforge-movie.' + ext);
-    setRecordStatus('✅ Downloaded as .' + ext);
-    setTimeout(() => setRecordStatus(''), 4000);
+    setRecordStatus('✅ Saved as sceneforge-movie.' + ext + (hasAudio ? ' (with audio)' : ' — no audio was captured'));
+    setTimeout(() => setRecordStatus(''), 5000);
   };
 
   stream.getVideoTracks()[0].onended = () => { if (isRecording) finishRecording(); };
-  mediaRecorder.start(200);
+  mediaRecorder.start(100);
   isRecording = true;
 
   const btn = document.getElementById('btn-record');
   btn.classList.add('recording');
-  btn.innerHTML = '<span class="rec-dot"></span> Stop Recording';
-  setRecordStatus('🔴 Recording… press Play now, then click Stop Recording when done');
+  btn.innerHTML = '<span class="rec-dot"></span> Stop & Save';
+  if (hasAudio) setRecordStatus('🔴 Recording with audio — click Stop & Save when done');
 }
 
 function finishRecording() {
@@ -1230,64 +1232,6 @@ function finishRecording() {
   btn.classList.remove('recording');
   btn.innerHTML = '<span class="rec-dot"></span> Record Video (.mov)';
   setRecordStatus('Saving…');
-}
-
-// ── Audio only (.m4a) ─────────────────────────────────────────────────────────
-async function toggleAudioExport() {
-  if (isRecordingAudio) { finishAudioExport(); return; }
-
-  setRecordStatus('☝️ In the browser dialog: select this tab and check ✅ "Share tab audio"');
-  let stream;
-  try {
-    stream = await captureStream();
-  } catch (e) {
-    setRecordStatus(e.name === 'NotAllowedError' ? '' : 'Audio capture unavailable');
-    return;
-  }
-
-  // Drop the video track — we only want audio
-  stream.getVideoTracks().forEach(t => t.stop());
-  const audioTracks = stream.getAudioTracks();
-  if (!audioTracks.length) {
-    setRecordStatus('⚠️ No audio captured — make sure you checked "Share tab audio"');
-    return;
-  }
-  const audioStream = new MediaStream(audioTracks);
-
-  const mimeType = pickMime(['audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/webm;codecs=opus', 'audio/webm']);
-  const ext = mimeType.startsWith('audio/mp4') ? 'm4a' : 'webm';
-
-  let audioRecorder = new MediaRecorder(audioStream, { mimeType });
-  let audioChunks = [];
-  audioRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
-  audioRecorder.onstop = () => {
-    audioTracks.forEach(t => t.stop());
-    const blob = new Blob(audioChunks, { type: mimeType });
-    downloadBlob(blob, 'sceneforge-audio.' + ext);
-    setRecordStatus('✅ Audio downloaded as .' + ext);
-    isRecordingAudio = false;
-    const btn = document.getElementById('btn-audio');
-    btn.classList.remove('recording');
-    btn.innerHTML = '<span class="rec-dot" style="background:#a78bfa"></span> Export Audio (.m4a)';
-    setTimeout(() => setRecordStatus(''), 4000);
-  };
-
-  audioTracks[0].onended = () => { if (isRecordingAudio) finishAudioExport(); };
-  audioRecorder.start(200);
-  isRecordingAudio = true;
-  // stash so finishAudioExport can stop it
-  window._audioRecorder = audioRecorder;
-
-  const btn = document.getElementById('btn-audio');
-  btn.classList.add('recording');
-  btn.innerHTML = '<span class="rec-dot" style="background:#a78bfa"></span> Stop Audio Export';
-  setRecordStatus('🎙️ Recording audio… press Play now, then click Stop Audio Export when done');
-}
-
-function finishAudioExport() {
-  if (window._audioRecorder && window._audioRecorder.state !== 'inactive') {
-    window._audioRecorder.stop();
-  }
 }
 
 function setRecordStatus(msg) {

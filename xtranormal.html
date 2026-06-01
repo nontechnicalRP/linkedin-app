@@ -1611,13 +1611,26 @@ async function toggleRecording() {
     RC.stop();
     document.getElementById('record-canvas').style.display = 'none';
     audioTracks.forEach(t => t.stop());
-    const durationMs = performance.now() - recordingStartTime;
-    const hasAudio = audioTracks.length > 0;
-    setRecordStatus('Fixing metadata…');
-    const blob = await patchMp4Duration(recordedChunks, mimeType, durationMs);
-    downloadBlob(blob, 'sceneforge-movie.mov');
-    setRecordStatus('✅ sceneforge-movie.mov downloaded' + (hasAudio ? ' with audio' : ' — video only'));
-    setTimeout(() => setRecordStatus(''), 6000);
+    try {
+      const durationMs = performance.now() - recordingStartTime;
+      const hasAudio = audioTracks.length > 0;
+      setRecordStatus('Processing…');
+      const blob = await patchMp4Duration(recordedChunks, mimeType, durationMs);
+      // Show a persistent download button — programmatic clicks are blocked
+      // by popup blockers when not triggered by a direct user gesture.
+      const url = URL.createObjectURL(blob);
+      const rs = document.getElementById('record-status');
+      rs.innerHTML = '';
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'sceneforge-movie.mov';
+      a.textContent = '⬇ Download sceneforge-movie.mov' + (hasAudio ? ' (with audio)' : '');
+      a.style.cssText = 'color:#4f8ef7;font-weight:700;text-decoration:underline;cursor:pointer;font-size:12px;';
+      a.onclick = () => setTimeout(() => { URL.revokeObjectURL(url); rs.textContent = '✅ Downloaded!'; }, 1000);
+      rs.appendChild(a);
+    } catch (err) {
+      setRecordStatus('❌ Error: ' + err.message);
+    }
   };
 
   mediaRecorder.start(100);
@@ -1645,7 +1658,7 @@ function finishRecording() {
 }
 
 function setRecordStatus(msg) {
-  document.getElementById('record-status').textContent = msg;
+  document.getElementById('record-status').textContent = msg; // clears any link nodes too
 }
 
 // ── Save / Load Scene ─────────────────────────────────────────────────────────

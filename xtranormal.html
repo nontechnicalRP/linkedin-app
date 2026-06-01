@@ -1326,6 +1326,7 @@ function speakNext() {
     hideBubble(0); hideBubble(1);
     updateProgress(lines.length, lines.length);
     setStatus('Finished!');
+    if (isRecording) setTimeout(finishRecording, 800);
     return;
   }
 
@@ -1549,8 +1550,8 @@ async function toggleRecording() {
 
   const btn = document.getElementById('btn-record');
   btn.classList.add('recording');
-  btn.innerHTML = '<span class="rec-dot"></span> Stop & Save';
-  setRecordStatus('🔴 Recording' + (audioTracks.length ? ' with audio' : ' (video only)') + ' — press Play to start');
+  btn.innerHTML = '<span class="rec-dot"></span> Stop & Save Early';
+  setRecordStatus('🔴 Recording' + (audioTracks.length ? ' with audio' : ' (video only)') + ' — will auto-save when scene ends');
 
   // Auto-start playback
   handleStop();

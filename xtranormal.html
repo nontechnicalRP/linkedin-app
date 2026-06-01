@@ -1568,29 +1568,27 @@ async function patchMp4Duration(chunks, mimeType, durationMs) {
 async function toggleRecording() {
   if (isRecording) { finishRecording(); return; }
 
-  // Show canvas overlay so Chrome definitely renders it (off-screen canvases may not be rendered)
   const recCanvas = document.getElementById('record-canvas');
   recCanvas.style.display = 'block';
   RC.start();
   const canvasStream = recCanvas.captureStream(30);
 
-  // Capture tab audio — user must pick this tab and check "Share tab audio"
+  // speechSynthesis routes through the OS TTS engine and bypasses the browser's
+  // Web Audio pipeline — getDisplayMedia tab audio can never capture it.
+  // getUserMedia (microphone) is the only browser-native way to capture TTS:
+  // the mic picks up the speech playing from the speakers.
   let audioTracks = [];
-  setRecordStatus('In the dialog: pick THIS TAB → tick "Share tab audio" → click Share');
+  setRecordStatus('Allow microphone access → the mic will capture the voice audio from your speakers');
   try {
-    const ds = await navigator.mediaDevices.getDisplayMedia({
-      video: true,
-      audio: { echoCancellation: false, noiseSuppression: false },
-      preferCurrentTab: true,
-      selfBrowserSurface: 'include'
+    const micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
     });
-    audioTracks = ds.getAudioTracks();
-    ds.getVideoTracks().forEach(t => t.stop());
-  } catch (e) { /* cancelled — continue without audio */ }
-
-  if (!audioTracks.length) {
-    setRecordStatus('⚠️ No audio — to add voices, stop and try again, checking "Share tab audio"');
-    await new Promise(r => setTimeout(r, 1500));
+    audioTracks = micStream.getAudioTracks();
+    setRecordStatus('🎙️ Mic ready — make sure audio plays through SPEAKERS, not headphones');
+    await new Promise(r => setTimeout(r, 1200));
+  } catch (e) {
+    setRecordStatus('No mic access — recording video only');
+    await new Promise(r => setTimeout(r, 1000));
   }
 
   // Try to get a real MP4 codec; always save as .mov regardless

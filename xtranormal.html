@@ -818,7 +818,346 @@
 
 </div>
 
+<!-- Hidden canvas for recording -->
+<canvas id="record-canvas" width="800" height="500" style="position:fixed;top:-9999px;left:-9999px;pointer-events:none"></canvas>
+
 <script>
+// ── Canvas Renderer (RC) ──────────────────────────────────────────────────────
+const RC = (() => {
+  const canvas = document.getElementById('record-canvas');
+  const ctx = canvas.getContext('2d');
+  let rafId = null;
+  let startTime = null;
+  let talkingIdx = -1;   // -1 = none, 0 = char0, 1 = char1
+  let bubbleText = '';
+  let mouthRy = 2;
+
+  // Character color palettes
+  const PALETTES = [
+    { body:'#4f8ef7', dark:'#3068d0', darker:'#2050b0', skin:'#f0c090', darkskin:'#e0a870', hair:'#2a1808', iris:'#1e44cc' },
+    { body:'#f7734f', dark:'#b03c1e', darker:'#8a2c12', skin:'#f0d0a8', darkskin:'#e0b888', hair:'#180a2a', iris:'#5a1a9a' }
+  ];
+
+  function roundRect(ctx, x, y, w, h, r) {
+    r = Math.min(r, w/2, h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.lineTo(x+w-r, y);
+    ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+    ctx.lineTo(x+w, y+h-r);
+    ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+    ctx.lineTo(x+r, y+h);
+    ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+    ctx.lineTo(x, y+r);
+    ctx.quadraticCurveTo(x, y, x+r, y);
+    ctx.closePath();
+  }
+
+  function drawCharacter(ctx, idx, cx, bottomY, talking, ry, bobOffset) {
+    const p = PALETTES[idx];
+    const isFlipped = idx === 1;
+    const by = bottomY + bobOffset;
+
+    ctx.save();
+    if (isFlipped) {
+      ctx.translate(cx * 2, 0);
+      ctx.scale(-1, 1);
+    }
+
+    // Shadow
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(cx, by, 29, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Legs
+    ctx.fillStyle = p.dark;
+    roundRect(ctx, cx-16, by-54, 13, 44, 6); ctx.fill();
+    roundRect(ctx, cx+3, by-54, 13, 44, 6);  ctx.fill();
+
+    // Feet
+    ctx.fillStyle = p.darker;
+    ctx.beginPath(); ctx.ellipse(cx-10, by-10, 10, 5.5, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx+8, by-10, 10, 5.5, 0, 0, Math.PI*2); ctx.fill();
+
+    // Body
+    ctx.fillStyle = p.body;
+    roundRect(ctx, cx-25, by-102, 50, 52, 11); ctx.fill();
+
+    // Shirt placket
+    ctx.fillStyle = p.dark;
+    roundRect(ctx, cx-7, by-102, 14, 22, 3); ctx.fill();
+
+    // Arms
+    ctx.strokeStyle = p.body;
+    ctx.lineWidth = 13;
+    ctx.lineCap = 'round';
+    // Left arm
+    ctx.beginPath();
+    ctx.moveTo(cx-25, by-94);
+    ctx.quadraticCurveTo(cx-39, by-88, cx-37, by-74);
+    ctx.stroke();
+    ctx.fillStyle = p.body;
+    ctx.beginPath(); ctx.arc(cx-37, by-73, 7, 0, Math.PI*2); ctx.fill();
+    // Right arm
+    ctx.beginPath();
+    ctx.moveTo(cx+25, by-94);
+    ctx.quadraticCurveTo(cx+39, by-88, cx+37, by-74);
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx+37, by-73, 7, 0, Math.PI*2); ctx.fill();
+
+    // Neck
+    ctx.fillStyle = p.skin;
+    roundRect(ctx, cx-8, by-116, 16, 17, 6); ctx.fill();
+
+    // Head
+    roundRect(ctx, cx-29, by-158, 58, 50, 18); ctx.fill();
+
+    // Hair
+    ctx.fillStyle = p.hair;
+    roundRect(ctx, cx-29, by-158, 58, 20, 14); ctx.fill();
+    // side pieces
+    roundRect(ctx, cx-29, by-150, 11, 16, 5); ctx.fill();
+    if (idx === 1) {
+      roundRect(ctx, cx+18, by-150, 11, 14, 5); ctx.fill();
+    }
+
+    // Ears
+    ctx.fillStyle = p.darkskin;
+    ctx.beginPath(); ctx.ellipse(cx-29, by-130, 4.5, 6.5, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx+29, by-130, 4.5, 6.5, 0, 0, Math.PI*2); ctx.fill();
+
+    // Eyes
+    const eyeOffsets = [-12, 12];
+    eyeOffsets.forEach(ex => {
+      const eyeX = cx + ex;
+      const eyeY = by-130;
+      ctx.fillStyle = 'white';
+      ctx.beginPath(); ctx.ellipse(eyeX, eyeY, 5.5, 6.5, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = p.iris;
+      ctx.beginPath(); ctx.ellipse(eyeX+1.5, eyeY+1, 3.2, 3.8, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#060d30';
+      ctx.beginPath(); ctx.arc(eyeX+1.5, eyeY, 1.3, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'white';
+      ctx.beginPath(); ctx.arc(eyeX+2.8, eyeY-1.2, 0.8, 0, Math.PI*2); ctx.fill();
+    });
+
+    // Eyebrows
+    ctx.strokeStyle = p.hair;
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(cx-18, by-138); ctx.quadraticCurveTo(cx-12, by-141, cx-7, by-139); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx+7, by-138); ctx.quadraticCurveTo(cx+13, by-141, cx+18, by-139); ctx.stroke();
+
+    // Nose
+    ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(cx-2, by-124); ctx.quadraticCurveTo(cx, by-120, cx+2, by-124); ctx.stroke();
+
+    // Mouth
+    if (talking && ry > 0) {
+      ctx.fillStyle = '#7a1a1a';
+      ctx.beginPath(); ctx.ellipse(cx, by-112, 9, ry, 0, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = idx === 0 ? '#c07050' : '#b05840';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    } else {
+      ctx.strokeStyle = idx === 0 ? '#c07050' : '#b05840';
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx-9, by-115);
+      ctx.quadraticCurveTo(cx, by-109, cx+9, by-115);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  function drawBubble(ctx, text, cx, bubbleBottomY) {
+    if (!text) return;
+    ctx.save();
+    const maxWidth = 200;
+    const fontSize = 13;
+    ctx.font = `600 ${fontSize}px "Segoe UI", system-ui, sans-serif`;
+
+    // Word wrap
+    const words = text.split(' ');
+    const lines = [];
+    let line = '';
+    for (const w of words) {
+      const test = line ? line + ' ' + w : w;
+      if (ctx.measureText(test).width > maxWidth) {
+        if (line) lines.push(line);
+        line = w;
+      } else { line = test; }
+    }
+    if (line) lines.push(line);
+
+    const lineH = fontSize * 1.4;
+    const padX = 14, padY = 10;
+    const textW = Math.min(maxWidth, Math.max(...lines.map(l => ctx.measureText(l).width)));
+    const boxW = textW + padX * 2;
+    const boxH = lines.length * lineH + padY * 2;
+    const boxX = cx - boxW / 2;
+    const boxY = bubbleBottomY - boxH;
+    const r = 12;
+
+    // Shadow
+    ctx.shadowColor = 'rgba(0,0,0,0.4)';
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetY = 4;
+
+    // Box
+    ctx.fillStyle = 'rgba(255,255,255,0.97)';
+    roundRect(ctx, boxX, boxY, boxW, boxH, r);
+    ctx.fill();
+
+    ctx.shadowColor = 'transparent';
+
+    // Triangle pointer
+    ctx.fillStyle = 'rgba(255,255,255,0.97)';
+    ctx.beginPath();
+    ctx.moveTo(cx - 8, bubbleBottomY);
+    ctx.lineTo(cx + 8, bubbleBottomY);
+    ctx.lineTo(cx, bubbleBottomY + 10);
+    ctx.closePath();
+    ctx.fill();
+
+    // Text
+    ctx.fillStyle = '#111';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    lines.forEach((l, i) => {
+      ctx.fillText(l, cx, boxY + padY + i * lineH);
+    });
+
+    ctx.restore();
+  }
+
+  function drawBackground(ctx) {
+    const scene = document.getElementById('stage').className.replace(/.*scene-(\w+).*/, '$1');
+    if (scene === 'office') {
+      ctx.fillStyle = '#1a1f35';
+      ctx.fillRect(0, 0, 800, 310);
+      ctx.fillStyle = '#10142a';
+      ctx.fillRect(0, 310, 800, 190);
+      // Windows
+      [[40,40],[630,40]].forEach(([wx,wy]) => {
+        ctx.fillStyle = 'rgba(79,142,247,0.06)';
+        roundRect(ctx, wx, wy, 130, 170, 4); ctx.fill();
+        ctx.strokeStyle = 'rgba(79,142,247,0.18)'; ctx.lineWidth = 2;
+        roundRect(ctx, wx, wy, 130, 170, 4); ctx.stroke();
+        ctx.strokeStyle = 'rgba(79,142,247,0.12)'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(wx+65, wy); ctx.lineTo(wx+65, wy+170); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(wx, wy+85); ctx.lineTo(wx+130, wy+85); ctx.stroke();
+      });
+    } else if (scene === 'park') {
+      ctx.fillStyle = '#1a3a28';
+      ctx.fillRect(0, 0, 800, 300);
+      ctx.fillStyle = '#14260f';
+      ctx.fillRect(0, 300, 800, 200);
+      // Trees
+      [[64,230],[729,230]].forEach(([tx,ty]) => {
+        ctx.fillStyle = 'rgba(80,40,10,0.6)';
+        roundRect(ctx, tx-9, ty, 18, 80, 4); ctx.fill();
+        ctx.fillStyle = 'rgba(30,120,30,0.55)';
+        ctx.beginPath(); ctx.ellipse(tx, ty-10, 45, 55, 0, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = 'rgba(40,150,40,0.5)';
+        ctx.beginPath(); ctx.ellipse(tx, ty-30, 30, 38, 0, 0, Math.PI*2); ctx.fill();
+      });
+    } else {
+      // Space
+      const grad = ctx.createRadialGradient(240, 100, 10, 240, 100, 700);
+      grad.addColorStop(0, '#1a1060');
+      grad.addColorStop(1, '#050510');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 800, 500);
+      // Stars
+      const stars = [[42,28],[130,65],[250,40],[380,20],[490,55],[600,30],[720,18],[760,80],[80,120],[200,150]];
+      ctx.fillStyle = 'white';
+      stars.forEach(([sx,sy]) => {
+        ctx.beginPath(); ctx.arc(sx, sy, 1.5, 0, Math.PI*2); ctx.fill();
+      });
+      // Planet
+      ctx.fillStyle = 'rgba(100,60,160,0.2)';
+      ctx.beginPath(); ctx.arc(650, 100, 55, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = 'rgba(120,80,200,0.3)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(650, 100, 55, 0, Math.PI*2); ctx.stroke();
+      ctx.strokeStyle = 'rgba(120,80,200,0.25)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.ellipse(650, 100, 90, 16, 0, 0, Math.PI*2); ctx.stroke();
+      // Platform
+      ctx.fillStyle = 'rgba(100,80,220,0.35)';
+      roundRect(ctx, 50, 307, 700, 6, 3); ctx.fill();
+    }
+  }
+
+  function renderFrame(ts) {
+    if (!startTime) startTime = ts;
+    const elapsed = ts - startTime;
+
+    ctx.clearRect(0, 0, 800, 500);
+    drawBackground(ctx);
+
+    // Floor line
+    ctx.fillStyle = 'rgba(255,255,255,0.07)';
+    ctx.fillRect(0, 360, 800, 2);
+
+    const bottomY = 360;
+
+    // Bob animation
+    const bob0 = Math.sin(elapsed / 2800 * Math.PI * 2) * (talkingIdx === 0 ? 7 : 3);
+    const bob1 = Math.sin(elapsed / 2600 * Math.PI * 2 + 1) * (talkingIdx === 1 ? 7 : 3);
+
+    // Char 0 at x=200
+    drawCharacter(ctx, 0, 200, bottomY, talkingIdx === 0, mouthRy, bob0);
+    // Char 1 at x=600 (flipped)
+    drawCharacter(ctx, 1, 600, bottomY, talkingIdx === 1, mouthRy, bob1);
+
+    // Speech bubbles
+    if (talkingIdx === 0 && bubbleText) drawBubble(ctx, bubbleText, 200, bottomY - 170);
+    if (talkingIdx === 1 && bubbleText) drawBubble(ctx, bubbleText, 600, bottomY - 170);
+
+    // Nametags
+    ctx.font = 'bold 11px "Segoe UI", system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.letterSpacing = '1.5px';
+    ctx.fillStyle = '#4f8ef7';
+    ctx.fillText((document.getElementById('char1-name').textContent || 'ALEX').toUpperCase(), 200, bottomY + 20);
+    ctx.fillStyle = '#f7734f';
+    ctx.fillText((document.getElementById('char2-name').textContent || 'MORGAN').toUpperCase(), 600, bottomY + 20);
+
+    if (rafId !== null) {
+      rafId = requestAnimationFrame(renderFrame);
+    }
+  }
+
+  return {
+    start() {
+      startTime = null;
+      rafId = 0; // will be set in renderFrame
+      rafId = requestAnimationFrame(renderFrame);
+    },
+    stop() {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = null;
+    },
+    setTalking(idx, text) {
+      talkingIdx = idx;
+      bubbleText = text || '';
+    },
+    setIdle() {
+      talkingIdx = -1;
+      bubbleText = '';
+    },
+    setMouth(ry) {
+      mouthRy = ry;
+    }
+  };
+})();
+
 // ── Eye blink keyframe via WAAPI ──────────────────────────────────────────────
 document.querySelectorAll('.blink-eye').forEach(el => {
   el.animate(
@@ -1067,10 +1406,14 @@ function setTalking(idx) {
     let open = true;
     mouthTimerIds[idx] = setInterval(() => {
       if (!talk) return;
-      talk.setAttribute('ry', open ? '5.5' : '2');
+      const ryVal = open ? 5.5 : 2;
+      talk.setAttribute('ry', ryVal);
+      RC.setMouth(ryVal);
       open = !open;
     }, 140);
   }
+
+  RC.setTalking(idx, lines[currentLine]?.text || '');
 }
 
 function setIdle(idx) {
@@ -1084,6 +1427,8 @@ function setIdle(idx) {
   const talk = document.getElementById('char' + n + '-mouth-talk');
   if (idle) idle.style.display = '';
   if (talk) { talk.setAttribute('ry', '0'); talk.style.opacity = '0'; }
+
+  RC.setIdle();
 }
 
 function showBubble(idx, text) {
@@ -1170,59 +1515,46 @@ function downloadBlob(blob, filename) {
 async function toggleRecording() {
   if (isRecording) { finishRecording(); return; }
 
-  setRecordStatus('☝️ Select this tab in the dialog and check ✅ "Share tab audio" — then press Play');
-  let stream;
+  RC.start();
+  const canvasStream = document.getElementById('record-canvas').captureStream(30);
+
+  let audioTracks = [];
+  setRecordStatus('☝️ Optional: select this tab + check "Share tab audio" for voice, or click Cancel for video-only');
   try {
-    stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: 30, displaySurface: 'browser' },
-      audio: { echoCancellation: false, noiseSuppression: false, sampleRate: 44100 },
-      preferCurrentTab: true
+    const ds = await navigator.mediaDevices.getDisplayMedia({
+      video: true, audio: true, preferCurrentTab: true
     });
-  } catch (e) {
-    setRecordStatus(e.name === 'NotAllowedError' ? '' : 'Screen capture not available in this browser');
-    return;
-  }
+    audioTracks = ds.getAudioTracks();
+    ds.getVideoTracks().forEach(t => t.stop());
+  } catch (e) { /* user cancelled or not supported - video-only */ }
 
-  // Build a combined stream that always has both video and audio tracks
-  const combinedTracks = [...stream.getVideoTracks(), ...stream.getAudioTracks()];
-  if (combinedTracks.length === 0) { setRecordStatus('No tracks captured'); return; }
-  const combined = new MediaStream(combinedTracks);
-
-  const hasAudio = stream.getAudioTracks().length > 0;
-  if (!hasAudio) {
-    setRecordStatus('⚠️ No audio — re-record and check "Share tab audio" in the dialog');
-  }
-
-  // Prefer MP4 with audio codec (saves as .mov); fall back to webm
-  const mimeType = pickMime([
-    'video/mp4;codecs=avc1,mp4a.40.2',
-    'video/mp4;codecs=h264,aac',
-    'video/mp4',
-    'video/webm;codecs=vp9,opus',
-    'video/webm;codecs=vp8,opus',
-    'video/webm'
-  ]);
+  const combined = new MediaStream([...canvasStream.getVideoTracks(), ...audioTracks]);
+  const mimeType = pickMime(['video/mp4;codecs=avc1,mp4a.40.2','video/mp4','video/webm;codecs=vp9,opus','video/webm']);
   const ext = mimeType.startsWith('video/mp4') ? 'mov' : 'webm';
 
   mediaRecorder = new MediaRecorder(combined, { mimeType });
   recordedChunks = [];
   mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
   mediaRecorder.onstop = () => {
-    stream.getTracks().forEach(t => t.stop());
+    RC.stop();
+    audioTracks.forEach(t => t.stop());
     const blob = new Blob(recordedChunks, { type: mimeType });
     downloadBlob(blob, 'sceneforge-movie.' + ext);
-    setRecordStatus('✅ Saved as sceneforge-movie.' + ext + (hasAudio ? ' (with audio)' : ' — no audio was captured'));
-    setTimeout(() => setRecordStatus(''), 5000);
+    setRecordStatus('✅ Saved as sceneforge-movie.' + ext);
+    setTimeout(() => setRecordStatus(''), 4000);
   };
 
-  stream.getVideoTracks()[0].onended = () => { if (isRecording) finishRecording(); };
   mediaRecorder.start(100);
   isRecording = true;
 
   const btn = document.getElementById('btn-record');
   btn.classList.add('recording');
   btn.innerHTML = '<span class="rec-dot"></span> Stop & Save';
-  if (hasAudio) setRecordStatus('🔴 Recording with audio — click Stop & Save when done');
+  setRecordStatus('🔴 Recording' + (audioTracks.length ? ' with audio' : ' (video only)') + ' — press Play to start');
+
+  // Auto-start playback
+  handleStop();
+  setTimeout(() => handlePlay(), 300);
 }
 
 function finishRecording() {

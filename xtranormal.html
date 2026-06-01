@@ -1582,12 +1582,25 @@ function startRecordAudio() {
   recAudioCtx = new AudioContext();
   recAudioDest = recAudioCtx.createMediaStreamDestination();
   recMasterComp = recAudioCtx.createDynamicsCompressor();
+  // Short bloop at start — confirms audio is in the file when played back
   recMasterComp.threshold.value = -14;
   recMasterComp.knee.value = 4;
   recMasterComp.ratio.value = 6;
   recMasterComp.attack.value = 0.002;
   recMasterComp.release.value = 0.1;
   recMasterComp.connect(recAudioDest);
+
+  const t = recAudioCtx.currentTime + 0.1;
+  [520, 780].forEach((freq, i) => {
+    const o = recAudioCtx.createOscillator();
+    const g = recAudioCtx.createGain();
+    o.type = 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0, t + i * 0.13);
+    g.gain.linearRampToValueAtTime(0.35, t + i * 0.13 + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.13 + 0.16);
+    o.connect(g); g.connect(recMasterComp);
+    o.start(t + i * 0.13); o.stop(t + i * 0.13 + 0.18);
+  });
 }
 
 function stopRecordAudio() {
@@ -1665,14 +1678,17 @@ function toggleRecording() {
   ]);
   const fileExt = mimeType.startsWith('video/webm') ? 'webm' : 'mov';
 
-  // Add audio track directly to the canvas stream — more reliable than new MediaStream([...])
+  // Combine canvas video + Web Audio destination into one stream for MediaRecorder
   const canvasStream = recCanvas.captureStream(30);
   const audioTrack = recAudioDest.stream.getAudioTracks()[0];
-  if (audioTrack) canvasStream.addTrack(audioTrack);
+  const recStream = new MediaStream([
+    ...canvasStream.getVideoTracks(),
+    ...(audioTrack ? [audioTrack] : [])
+  ]);
 
   setRecordStatus(`🔴 Recording (${mimeType}) · ${audioTrack ? 'audio ✓' : 'video only'}`);
 
-  mediaRecorder = new MediaRecorder(canvasStream, { mimeType });
+  mediaRecorder = new MediaRecorder(recStream, { mimeType });
   recordedChunks = [];
   mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
   mediaRecorder.onstop = async () => {

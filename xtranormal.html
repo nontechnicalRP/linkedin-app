@@ -782,6 +782,17 @@
     </div>
     <div class="status-line" id="status-line">Ready — press Play to begin</div>
     <div class="controls-title" style="margin-top:4px">Export</div>
+    <div class="playback-btns">
+      <button class="btn btn-pause" style="flex:1" onclick="saveScene()">
+        <svg width="12" height="13" viewBox="0 0 12 13" fill="currentColor"><path d="M1 0h8l3 3v9a1 1 0 01-1 1H1a1 1 0 01-1-1V1a1 1 0 011-1zm2 1v3h5V1H3zm4 7a3 3 0 11-6 0 3 3 0 016 0z" opacity=".85"/></svg>
+        Save Scene
+      </button>
+      <button class="btn btn-pause" style="flex:1" onclick="document.getElementById('load-file-input').click()">
+        <svg width="13" height="12" viewBox="0 0 13 12" fill="currentColor"><path d="M1.5 0A1.5 1.5 0 000 1.5v9A1.5 1.5 0 001.5 12h10a1.5 1.5 0 001.5-1.5v-6L8.5 0H1.5zm5 1.5L11.5 6H9v3H4V6H1.5L6.5 1.5z" opacity=".85"/></svg>
+        Load Scene
+      </button>
+    </div>
+    <input type="file" id="load-file-input" accept=".sceneforge,.json" style="display:none" onchange="loadSceneFile(this)">
     <button class="btn btn-record" id="btn-record" onclick="toggleRecording()">
       <span class="rec-dot"></span>
       Record Video
@@ -1218,6 +1229,75 @@ function finishRecording() {
 
 function setRecordStatus(msg) {
   document.getElementById('record-status').textContent = msg;
+}
+
+// ── Save / Load Scene ─────────────────────────────────────────────────────────
+function saveScene() {
+  const stageEl = document.getElementById('stage');
+  const sceneMatch = stageEl.className.match(/scene-(\w+)/);
+  const scene = sceneMatch ? sceneMatch[1] : 'office';
+
+  const data = {
+    version: 1,
+    scene,
+    char1Name: document.getElementById('input-c1').value,
+    char2Name: document.getElementById('input-c2').value,
+    script: document.getElementById('script-editor').value
+  };
+
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const title = (data.char1Name + '-' + data.char2Name).toLowerCase().replace(/\s+/g, '-');
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'sceneforge-' + title + '.sceneforge';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  setRecordStatus('Scene saved!');
+  setTimeout(() => setRecordStatus(''), 2500);
+}
+
+function loadSceneFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      // Restore script
+      if (data.script !== undefined) {
+        document.getElementById('script-editor').value = data.script;
+        parseScript();
+      }
+      // Restore character names (override auto-detect)
+      if (data.char1Name) {
+        document.getElementById('input-c1').value = data.char1Name;
+        renameChar(0, data.char1Name);
+      }
+      if (data.char2Name) {
+        document.getElementById('input-c2').value = data.char2Name;
+        renameChar(1, data.char2Name);
+      }
+      // Restore scene
+      if (data.scene) {
+        const btn = document.querySelector('.scene-btn[onclick*="' + data.scene + '"]');
+        setScene(data.scene, btn || document.querySelector('.scene-btn'));
+        if (btn) {
+          document.querySelectorAll('.scene-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+        }
+      }
+      setRecordStatus('Scene loaded!');
+      setTimeout(() => setRecordStatus(''), 2500);
+    } catch {
+      setRecordStatus('Invalid scene file');
+      setTimeout(() => setRecordStatus(''), 3000);
+    }
+  };
+  reader.readAsText(file);
+  input.value = '';
 }
 </script>
 </body>

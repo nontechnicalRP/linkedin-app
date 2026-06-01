@@ -1443,22 +1443,19 @@ function hideBubble(idx) {
 }
 
 // ── Character renaming ────────────────────────────────────────────────────────
-// displayNames[0/1] = what to show visually for each character slot
 let displayNames = ['ALEX', 'MORGAN'];
+let manuallyRenamed = [false, false]; // true once the user edits a name input
 
 function renameChar(idx, rawValue) {
   const name = rawValue.trim().toUpperCase() || (idx === 0 ? 'ALEX' : 'MORGAN');
   displayNames[idx] = name;
-  // Update stage nametag
+  manuallyRenamed[idx] = true;
   document.getElementById('char' + (idx + 1) + '-name').textContent = name;
-  // Update legend pill
   document.getElementById('legend-c' + (idx + 1)).textContent = name;
-  // Rebuild charMap so the correct script name maps to this slot
   rebuildCharMap();
 }
 
 function rebuildCharMap() {
-  // Re-derive the two script character names (first two unique names found)
   const raw = document.getElementById('script-editor').value;
   const scriptChars = [];
   raw.split('\n').forEach(l => {
@@ -1473,25 +1470,29 @@ function rebuildCharMap() {
   if (scriptChars[1]) charMap[scriptChars[1]] = 1;
 }
 
-// Override parseScript to also sync display names with inputs
+// Override parseScript to sync display names — but never overwrite manually set names
 const _origParseScript = parseScript;
 parseScript = function() {
   _origParseScript();
-  // Sync input fields to whatever auto-detected names were found, but
-  // only if the user hasn't manually changed them (check if input matches
-  // the previous auto-detect result, i.e. still default-looking)
   const c1Input = document.getElementById('input-c1');
   const c2Input = document.getElementById('input-c2');
-  // If the input still matches our tracked display name, follow the script
-  if (c1Input && c1Input.value.toUpperCase() === displayNames[0]) {
+  // Only follow the script's auto-detected name if the user hasn't manually renamed it
+  if (!manuallyRenamed[0] && c1Input) {
     const newName = document.getElementById('char1-name').textContent;
     c1Input.value = newName;
     displayNames[0] = newName;
+  } else if (manuallyRenamed[0] && c1Input) {
+    // Keep user's custom name on the nametag/legend regardless of what's in the script
+    document.getElementById('char1-name').textContent = displayNames[0];
+    document.getElementById('legend-c1').textContent = displayNames[0];
   }
-  if (c2Input && c2Input.value.toUpperCase() === displayNames[1]) {
+  if (!manuallyRenamed[1] && c2Input) {
     const newName = document.getElementById('char2-name').textContent;
     c2Input.value = newName;
     displayNames[1] = newName;
+  } else if (manuallyRenamed[1] && c2Input) {
+    document.getElementById('char2-name').textContent = displayNames[1];
+    document.getElementById('legend-c2').textContent = displayNames[1];
   }
 };
 
@@ -1611,7 +1612,8 @@ function loadSceneFile(input) {
         document.getElementById('script-editor').value = data.script;
         parseScript();
       }
-      // Restore character names (override auto-detect)
+      // Restore character names — mark as manual so they survive script re-parse
+      manuallyRenamed = [false, false];
       if (data.char1Name) {
         document.getElementById('input-c1').value = data.char1Name;
         renameChar(0, data.char1Name);

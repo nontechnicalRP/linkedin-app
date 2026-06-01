@@ -433,6 +433,64 @@
   }
   .btn-small:hover { border-color: var(--accent); color: var(--accent); }
 
+  /* Character name inputs */
+  .char-names-section {
+    display: flex;
+    gap: 8px;
+  }
+  .char-name-field {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .char-name-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 700;
+  }
+  .char-name-label.c1 { color: var(--char1); }
+  .char-name-label.c2 { color: var(--char2); }
+  .char-name-input {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 6px 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    outline: none;
+    width: 100%;
+    transition: border-color 0.15s;
+  }
+  .char-name-input:focus { border-color: var(--accent); }
+  .char-name-input.c1:focus { border-color: var(--char1); }
+  .char-name-input.c2:focus { border-color: var(--char2); }
+
+  /* Record button */
+  .btn-record {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    position: relative;
+  }
+  .btn-record:hover:not(:disabled) { border-color: #f74f4f; color: #f74f4f; }
+  .btn-record.recording { border-color: #f74f4f; color: #f74f4f; background: rgba(247,79,79,0.1); }
+  .rec-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #f74f4f;
+    display: inline-block;
+  }
+  .btn-record.recording .rec-dot { animation: rec-blink 1s ease-in-out infinite; }
+  @keyframes rec-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+  }
+
   /* Responsive */
   @media (max-width: 900px) {
     .main {
@@ -696,7 +754,18 @@
 
   <!-- CONTROLS -->
   <div class="controls-panel">
-    <div class="controls-title">Playback</div>
+    <div class="controls-title">Characters</div>
+    <div class="char-names-section">
+      <div class="char-name-field">
+        <label class="char-name-label c1" for="input-c1">Character 1</label>
+        <input class="char-name-input c1" id="input-c1" type="text" maxlength="20" value="ALEX" oninput="renameChar(0, this.value)">
+      </div>
+      <div class="char-name-field">
+        <label class="char-name-label c2" for="input-c2">Character 2</label>
+        <input class="char-name-input c2" id="input-c2" type="text" maxlength="20" value="MORGAN" oninput="renameChar(1, this.value)">
+      </div>
+    </div>
+    <div class="controls-title" style="margin-top:4px">Playback</div>
     <div class="playback-btns">
       <button class="btn btn-play" id="btn-play" onclick="handlePlay()">
         <svg width="11" height="13" viewBox="0 0 11 13" fill="currentColor"><path d="M0 0 L11 6.5 L0 13Z"/></svg>
@@ -712,6 +781,12 @@
       </button>
     </div>
     <div class="status-line" id="status-line">Ready — press Play to begin</div>
+    <div class="controls-title" style="margin-top:4px">Export</div>
+    <button class="btn btn-record" id="btn-record" onclick="toggleRecording()">
+      <span class="rec-dot"></span>
+      Record Video
+    </button>
+    <div class="status-line" id="record-status" style="min-height:14px"></div>
   </div>
 
   <!-- EDITOR -->
@@ -1008,6 +1083,141 @@ function showBubble(idx, text) {
 
 function hideBubble(idx) {
   document.getElementById('bubble' + (idx + 1)).classList.remove('visible');
+}
+
+// ── Character renaming ────────────────────────────────────────────────────────
+// displayNames[0/1] = what to show visually for each character slot
+let displayNames = ['ALEX', 'MORGAN'];
+
+function renameChar(idx, rawValue) {
+  const name = rawValue.trim().toUpperCase() || (idx === 0 ? 'ALEX' : 'MORGAN');
+  displayNames[idx] = name;
+  // Update stage nametag
+  document.getElementById('char' + (idx + 1) + '-name').textContent = name;
+  // Update legend pill
+  document.getElementById('legend-c' + (idx + 1)).textContent = name;
+  // Rebuild charMap so the correct script name maps to this slot
+  rebuildCharMap();
+}
+
+function rebuildCharMap() {
+  // Re-derive the two script character names (first two unique names found)
+  const raw = document.getElementById('script-editor').value;
+  const scriptChars = [];
+  raw.split('\n').forEach(l => {
+    const t = l.trim();
+    const colon = t.indexOf(':');
+    if (colon < 1) return;
+    const c = t.slice(0, colon).trim().toUpperCase();
+    if (!scriptChars.includes(c)) scriptChars.push(c);
+  });
+  charMap = {};
+  if (scriptChars[0]) charMap[scriptChars[0]] = 0;
+  if (scriptChars[1]) charMap[scriptChars[1]] = 1;
+}
+
+// Override parseScript to also sync display names with inputs
+const _origParseScript = parseScript;
+parseScript = function() {
+  _origParseScript();
+  // Sync input fields to whatever auto-detected names were found, but
+  // only if the user hasn't manually changed them (check if input matches
+  // the previous auto-detect result, i.e. still default-looking)
+  const c1Input = document.getElementById('input-c1');
+  const c2Input = document.getElementById('input-c2');
+  // If the input still matches our tracked display name, follow the script
+  if (c1Input && c1Input.value.toUpperCase() === displayNames[0]) {
+    const newName = document.getElementById('char1-name').textContent;
+    c1Input.value = newName;
+    displayNames[0] = newName;
+  }
+  if (c2Input && c2Input.value.toUpperCase() === displayNames[1]) {
+    const newName = document.getElementById('char2-name').textContent;
+    c2Input.value = newName;
+    displayNames[1] = newName;
+  }
+};
+
+// ── Video Recording ───────────────────────────────────────────────────────────
+let mediaRecorder = null;
+let recordedChunks = [];
+let isRecording = false;
+
+async function toggleRecording() {
+  if (isRecording) {
+    stopRecording();
+  } else {
+    await startRecording();
+  }
+}
+
+async function startRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: 30, displaySurface: 'browser' },
+      audio: { echoCancellation: false, noiseSuppression: false },
+      preferCurrentTab: true
+    });
+
+    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+      ? 'video/webm;codecs=vp9'
+      : 'video/webm';
+
+    mediaRecorder = new MediaRecorder(stream, { mimeType });
+    recordedChunks = [];
+
+    mediaRecorder.ondataavailable = e => {
+      if (e.data.size > 0) recordedChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(recordedChunks, { type: 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'sceneforge-movie.webm';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setRecordStatus('Downloaded!');
+      setTimeout(() => setRecordStatus(''), 3000);
+    };
+
+    // If the user stops sharing via browser UI, reflect that
+    stream.getVideoTracks()[0].onended = () => {
+      if (isRecording) finishRecording();
+    };
+
+    mediaRecorder.start(200);
+    isRecording = true;
+    const btn = document.getElementById('btn-record');
+    btn.classList.add('recording');
+    btn.innerHTML = '<span class="rec-dot"></span> Stop Recording';
+    setRecordStatus('Recording… click Stop Recording when done');
+  } catch (e) {
+    if (e.name !== 'NotAllowedError') {
+      setRecordStatus('Recording unavailable in this browser');
+    }
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder && isRecording) finishRecording();
+}
+
+function finishRecording() {
+  isRecording = false;
+  mediaRecorder.stop();
+  const btn = document.getElementById('btn-record');
+  btn.classList.remove('recording');
+  btn.innerHTML = '<span class="rec-dot"></span> Record Video';
+  setRecordStatus('Saving video…');
+}
+
+function setRecordStatus(msg) {
+  document.getElementById('record-status').textContent = msg;
 }
 </script>
 </body>

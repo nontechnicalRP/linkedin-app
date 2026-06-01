@@ -1581,7 +1581,6 @@ let recMasterComp = null;
 function startRecordAudio() {
   recAudioCtx = new AudioContext();
   recAudioDest = recAudioCtx.createMediaStreamDestination();
-  // Single compressor shared by all voice nodes — prevents clipping when lines overlap
   recMasterComp = recAudioCtx.createDynamicsCompressor();
   recMasterComp.threshold.value = -18;
   recMasterComp.knee.value = 6;
@@ -1589,6 +1588,17 @@ function startRecordAudio() {
   recMasterComp.attack.value = 0.003;
   recMasterComp.release.value = 0.15;
   recMasterComp.connect(recAudioDest);
+
+  // Keep the audio track "alive" from frame 0 — without this Chrome may mark
+  // the track silent before any speech plays and drop audio from the recording
+  const keepAlive = recAudioCtx.createConstantSource();
+  const keepGain = recAudioCtx.createGain();
+  keepGain.gain.value = 0.0001; // inaudible but non-zero
+  keepAlive.connect(keepGain);
+  keepGain.connect(recAudioDest);
+  keepAlive.start();
+  // stored so we can stop it on cleanup
+  recAudioCtx._keepAlive = keepAlive;
 }
 
 function stopRecordAudio() {
@@ -1647,13 +1657,16 @@ function toggleRecording() {
   const canvasStream = recCanvas.captureStream(30);
   const audioStream = recAudioDest.stream;
 
+  // webm/opus is Chrome's native MediaRecorder format and reliably captures audio;
+  // mp4 variants often silently drop the audio track
   const mimeType = pickMime([
-    'video/mp4;codecs=h264,aac',
-    'video/mp4;codecs=avc1,mp4a.40.2',
-    'video/mp4',
     'video/webm;codecs=vp9,opus',
-    'video/webm'
+    'video/webm;codecs=vp8,opus',
+    'video/webm',
+    'video/mp4;codecs=avc1,mp4a.40.2',
+    'video/mp4'
   ]);
+  const fileExt = mimeType.startsWith('video/webm') ? 'webm' : 'mov';
 
   const combined = new MediaStream([
     ...canvasStream.getVideoTracks(),
@@ -1668,14 +1681,17 @@ function toggleRecording() {
     try {
       const durationMs = performance.now() - recordingStartTime;
       setRecordStatus('Processing…');
-      const blob = await patchMp4Duration(recordedChunks, mimeType, durationMs);
+      // patchMp4Duration only needed for fragmented MP4; WebM has correct duration natively
+      const blob = fileExt === 'mov'
+        ? await patchMp4Duration(recordedChunks, mimeType, durationMs)
+        : new Blob(recordedChunks, { type: mimeType });
       const url = URL.createObjectURL(blob);
       const rs = document.getElementById('record-status');
       rs.innerHTML = '';
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'sceneforge-movie.mov';
-      a.textContent = '⬇ Click to download sceneforge-movie.mov';
+      a.download = 'sceneforge-movie.' + fileExt;
+      a.textContent = '⬇ Click to download sceneforge-movie.' + fileExt;
       a.style.cssText = 'color:#4f8ef7;font-weight:700;text-decoration:underline;cursor:pointer;font-size:12px;';
       a.onclick = () => setTimeout(() => { URL.revokeObjectURL(url); rs.textContent = '✅ Downloaded!'; }, 1000);
       rs.appendChild(a);

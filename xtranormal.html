@@ -1588,29 +1588,10 @@ function startRecordAudio() {
   recMasterComp.attack.value = 0.002;
   recMasterComp.release.value = 0.1;
   recMasterComp.connect(recAudioDest);
-
-  // Audible "bloop" at t=0 confirms audio capture is working before any speech
-  playBloop(recAudioCtx.currentTime);
 }
 
 function stopRecordAudio() {
   if (recAudioCtx) { recAudioCtx.close(); recAudioCtx = null; recAudioDest = null; recMasterComp = null; }
-}
-
-function playBloop(t) {
-  if (!recAudioCtx || !recMasterComp) return;
-  [440, 660].forEach((freq, i) => {
-    const osc = recAudioCtx.createOscillator();
-    const g   = recAudioCtx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = freq;
-    g.gain.setValueAtTime(0, t + i * 0.12);
-    g.gain.linearRampToValueAtTime(0.4, t + i * 0.12 + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.12 + 0.18);
-    osc.connect(g); g.connect(recMasterComp);
-    osc.start(t + i * 0.12);
-    osc.stop(t + i * 0.12 + 0.2);
-  });
 }
 
 function synthesizeVoice(text, charIdx, durationSec) {
@@ -1645,8 +1626,7 @@ function synthesizeVoice(text, charIdx, durationSec) {
 
     osc.connect(f1); osc.connect(f2);
     f1.connect(g); f2.connect(g);
-    g.connect(recMasterComp); // → recording
-    g.connect(recAudioCtx.destination); // → speakers (hear it while recording)
+    g.connect(recMasterComp);
     osc.start(t);
     osc.stop(t + wordDur);
   });

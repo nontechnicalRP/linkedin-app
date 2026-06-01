@@ -1495,6 +1495,7 @@ parseScript = function() {
 let mediaRecorder = null;
 let recordedChunks = [];
 let isRecording = false;
+let recordingStartTime = 0;
 
 function pickMime(candidates) {
   for (const m of candidates) if (MediaRecorder.isTypeSupported(m)) return m;
@@ -1507,6 +1508,58 @@ function downloadBlob(blob, filename) {
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 15000);
+}
+
+// Chrome MediaRecorder with video/mp4 produces fragmented MP4 (fMP4) where
+// mvhd.duration is 0 because duration is unknown at recording start.
+// This patches the duration fields so players like QuickTime can play the file.
+async function patchMp4Duration(chunks, mimeType, durationMs) {
+  const raw = new Blob(chunks, { type: mimeType });
+  if (!mimeType.includes('mp4')) return raw; // WebM handles duration correctly
+  const buf = await raw.arrayBuffer();
+  const u8 = new Uint8Array(buf);
+  const view = new DataView(buf);
+
+  function tag(i) { return String.fromCharCode(u8[i], u8[i+1], u8[i+2], u8[i+3]); }
+
+  for (let i = 4; i < u8.length - 44; i++) {
+    if (tag(i) !== 'mvhd') continue;
+    const bs = i - 4; // box start (size field)
+    const ver = u8[bs + 8];
+    if (ver === 1) {
+      // v1: timescale at bs+28 (4 bytes), duration at bs+32 (8 bytes)
+      const timescale = view.getUint32(bs + 28) || 1000;
+      view.setUint32(bs + 28, timescale);
+      view.setBigUint64(bs + 32, BigInt(Math.round(durationMs * timescale / 1000)));
+    } else {
+      // v0: timescale at bs+20 (4 bytes), duration at bs+24 (4 bytes)
+      const timescale = view.getUint32(bs + 20) || 1000;
+      view.setUint32(bs + 24, Math.round(durationMs * timescale / 1000));
+    }
+    // Patch mehd (movie extends header) — fMP4 fragment duration hint
+    for (let j = bs; j < Math.min(bs + 600, u8.length - 16); j++) {
+      if (tag(j) !== 'mehd') continue;
+      const mbs = j - 4;
+      const mv = u8[mbs + 8];
+      const ts2 = ver === 1 ? view.getUint32(bs + 28) : view.getUint32(bs + 20);
+      if (mv === 1) view.setBigUint64(mbs + 12, BigInt(Math.round(durationMs * ts2 / 1000)));
+      else          view.setUint32(mbs + 12, Math.round(durationMs * ts2 / 1000));
+      break;
+    }
+    break;
+  }
+
+  // Patch all tkhd (track header) duration fields — use mvhd timescale (1000)
+  for (let i = 4; i < u8.length - 44; i++) {
+    if (tag(i) !== 'tkhd') continue;
+    const bs = i - 4;
+    const ver = u8[bs + 8];
+    const dur = Math.round(durationMs); // timescale=1000 so ms == units
+    if (ver === 1) view.setBigUint64(bs + 36, BigInt(dur));
+    else           view.setUint32(bs + 28, dur);
+  }
+
+  return new Blob([buf], { type: mimeType });
 }
 
 async function toggleRecording() {
@@ -1553,20 +1606,21 @@ async function toggleRecording() {
   mediaRecorder = new MediaRecorder(combined, { mimeType });
   recordedChunks = [];
   mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
-  mediaRecorder.onstop = () => {
+  mediaRecorder.onstop = async () => {
     RC.stop();
     document.getElementById('record-canvas').style.display = 'none';
     audioTracks.forEach(t => t.stop());
-    // Always name .mov — MP4-encoded files open in QuickTime; WebM-encoded
-    // files open in Chrome/Firefox/VLC if QuickTime doesn't recognise them.
-    const blob = new Blob(recordedChunks, { type: mimeType });
-    downloadBlob(blob, 'sceneforge-movie.mov');
+    const durationMs = performance.now() - recordingStartTime;
     const hasAudio = audioTracks.length > 0;
-    setRecordStatus('✅ sceneforge-movie.mov downloaded' + (hasAudio ? ' with audio' : ' — video only (no audio was captured)'));
+    setRecordStatus('Fixing metadata…');
+    const blob = await patchMp4Duration(recordedChunks, mimeType, durationMs);
+    downloadBlob(blob, 'sceneforge-movie.mov');
+    setRecordStatus('✅ sceneforge-movie.mov downloaded' + (hasAudio ? ' with audio' : ' — video only'));
     setTimeout(() => setRecordStatus(''), 6000);
   };
 
   mediaRecorder.start(100);
+  recordingStartTime = performance.now();
   isRecording = true;
 
   const btn = document.getElementById('btn-record');

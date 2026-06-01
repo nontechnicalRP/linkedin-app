@@ -1596,37 +1596,54 @@ function stopRecordAudio() {
 
 function synthesizeVoice(text, charIdx, durationSec) {
   if (!recAudioCtx || !recMasterComp) return;
-  const pitch = charIdx === 0 ? 105 : 175;
+  const basePitch = charIdx === 0 ? 105 : 175;
   const words = text.trim().split(/\s+/).filter(Boolean);
   const wordDur = durationSec / Math.max(words.length, 1);
   const now = recAudioCtx.currentTime;
-  const pitchSteps = [1, 1.08, 0.95, 1.05, 0.92, 1.12, 0.97];
 
-  words.forEach((_, i) => {
+  // Vowel formant pairs [F1, F2] — cycling gives varied "ah ee eh oh oo" feel
+  const vowels = charIdx === 0
+    ? [[730,1090],[270,2290],[530,1840],[570,840],[300,870]]   // male
+    : [[936,1551],[437,2761],[731,2058],[781,1136],[459,1105]]; // female
+
+  // Natural pitch contour: start mid, peak at 40%, fall to end
+  const pitchContour = words.map((_, i) => {
+    const pos = i / Math.max(words.length - 1, 1);
+    return basePitch * (1 + 0.08 * Math.sin(pos * Math.PI));
+  });
+
+  words.forEach((word, i) => {
     const t = now + i * wordDur;
+    const [f1, f2] = vowels[i % vowels.length];
+    const pitch = pitchContour[i];
+
     const osc = recAudioCtx.createOscillator();
     osc.type = 'sawtooth';
-    osc.frequency.value = pitch * pitchSteps[i % pitchSteps.length];
+    osc.frequency.value = pitch;
 
-    const f1 = recAudioCtx.createBiquadFilter();
-    f1.type = 'bandpass';
-    f1.frequency.value = charIdx === 0 ? 650 : 700;
-    f1.Q.value = 8;
+    // Glide pitch up slightly at onset then settle — mimics consonant→vowel transition
+    osc.frequency.setValueAtTime(pitch * 1.04, t);
+    osc.frequency.linearRampToValueAtTime(pitch, t + 0.06);
 
-    const f2 = recAudioCtx.createBiquadFilter();
-    f2.type = 'bandpass';
-    f2.frequency.value = charIdx === 0 ? 1100 : 2100;
-    f2.Q.value = 8;
+    const bp1 = recAudioCtx.createBiquadFilter();
+    bp1.type = 'bandpass'; bp1.frequency.value = f1; bp1.Q.value = 7;
 
-    const g = recAudioCtx.createGain();
-    g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(0.3, t + 0.03);
-    g.gain.setValueAtTime(0.24, t + wordDur * 0.5);
-    g.gain.linearRampToValueAtTime(0, t + wordDur * 0.85);
+    const bp2 = recAudioCtx.createBiquadFilter();
+    bp2.type = 'bandpass'; bp2.frequency.value = f2; bp2.Q.value = 9;
 
-    osc.connect(f1); osc.connect(f2);
-    f1.connect(g); f2.connect(g);
-    g.connect(recMasterComp);
+    const mix = recAudioCtx.createGain();
+    mix.gain.value = 0.5;
+
+    const env = recAudioCtx.createGain();
+    env.gain.setValueAtTime(0, t);
+    env.gain.linearRampToValueAtTime(0.35, t + 0.04);
+    env.gain.setValueAtTime(0.28, t + wordDur * 0.55);
+    env.gain.linearRampToValueAtTime(0, t + wordDur * 0.88);
+
+    osc.connect(bp1); osc.connect(bp2);
+    bp1.connect(mix); bp2.connect(mix);
+    mix.connect(env);
+    env.connect(recMasterComp);
     osc.start(t);
     osc.stop(t + wordDur);
   });

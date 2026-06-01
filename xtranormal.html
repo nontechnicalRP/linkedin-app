@@ -1362,8 +1362,20 @@ function speakNext() {
   speechSynthesis.speak(utt);
 
   if (isRecording && !usingTabAudio) {
-    const estimatedDuration = Math.max(1, text.split(/\s+/).length * 0.4) + 0.3;
-    synthesizeVoice(text, idx, estimatedDuration);
+    const buf = preFetchedBuffers[currentLine];
+    if (buf && recAudioCtx) {
+      // Play pre-fetched TTS buffer through AudioContext → captured in recording
+      const source = recAudioCtx.createBufferSource();
+      source.buffer = buf;
+      source.connect(recMasterComp);
+      source.connect(recAudioCtx.destination); // also audible through speakers
+      source.start();
+      // source.onended is not used for timing — speechSynthesis.onend drives speakNext()
+    } else {
+      // Fallback: oscillator synthesis when TTS fetch failed
+      const estimatedDuration = Math.max(1, text.split(/\s+/).length * 0.4) + 0.3;
+      synthesizeVoice(text, idx, estimatedDuration);
+    }
   }
 }
 
@@ -1651,6 +1663,40 @@ function synthesizeVoice(text, charIdx, durationSec) {
 }
 
 let usingTabAudio = false;
+let preFetchedBuffers = []; // indexed by line number, AudioBuffer or null
+
+async function preFetchAllVoices() {
+  if (!lines || lines.length === 0) return;
+  preFetchedBuffers = new Array(lines.length).fill(null);
+  const seVoices = ['Brian', 'Kimberly']; // charIdx 0 → Brian, 1 → Kimberly
+  let fetched = 0;
+  const total = lines.length;
+
+  for (let i = 0; i < lines.length; i++) {
+    const { char, text } = lines[i];
+    const charIdx = (charMap[char] !== undefined) ? charMap[char] : 0;
+    const voice = seVoices[charIdx];
+    const url = `https://api.streamelements.com/kappa/v2/speech?voice=${voice}&text=${encodeURIComponent(text)}`;
+    setRecordStatus(`Preparing voices (${i + 1}/${total})…`);
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const arrayBuf = await resp.arrayBuffer();
+      // Decode using a temporary AudioContext; recAudioCtx may not exist yet
+      const tmpCtx = new AudioContext();
+      try {
+        preFetchedBuffers[i] = await tmpCtx.decodeAudioData(arrayBuf);
+      } finally {
+        tmpCtx.close();
+      }
+      fetched++;
+    } catch (e) {
+      // Leave as null — speakNext will fall back to oscillator synthesis
+      console.warn(`TTS fetch failed for line ${i} ("${text.slice(0,30)}"): ${e.message}`);
+    }
+  }
+  setRecordStatus(`Voices ready (${fetched}/${total} fetched). Starting…`);
+}
 
 async function toggleRecording() {
   if (isRecording) { finishRecording(); return; }
@@ -1665,6 +1711,9 @@ async function toggleRecording() {
     'video/mp4'
   ]);
   const fileExt = mimeType.startsWith('video/webm') ? 'webm' : 'mov';
+
+  // ── Pre-fetch TTS audio from StreamElements ───────────────────────────────
+  await preFetchAllVoices();
 
   // ── Try microphone capture — mic picks up TTS voices from speakers ─────────
   // echoCancellation:false ensures the speaker audio isn't suppressed
@@ -1681,7 +1730,7 @@ async function toggleRecording() {
     // Mic denied — fall back to Web Audio synthesis
   }
 
-  startRecordAudio(); // always init for synthesis fallback path
+  startRecordAudio(); // always init for TTS buffer playback + synthesis fallback
 
   RC.start();
   const canvasStream = recCanvas.captureStream(30);
@@ -1692,7 +1741,8 @@ async function toggleRecording() {
     ...(audioTrack ? [audioTrack] : [])
   ]);
 
-  const audioDesc = micTrack ? 'mic voices ✓' : (audioTrack ? 'synth audio ✓' : 'video only');
+  const ttsReady = preFetchedBuffers.some(b => b !== null);
+  const audioDesc = micTrack ? 'mic voices ✓' : (ttsReady ? 'TTS audio ✓' : (audioTrack ? 'synth audio ✓' : 'video only'));
   setRecordStatus(`🔴 Recording · ${audioDesc}`);
 
   mediaRecorder = new MediaRecorder(recStream, { mimeType });

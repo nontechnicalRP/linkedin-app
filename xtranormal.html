@@ -1143,9 +1143,12 @@ const RC = (() => {
       talkingIdx = idx;
       bubbleText = text || '';
     },
-    setIdle() {
-      talkingIdx = -1;
-      bubbleText = '';
+    setIdle(idx) {
+      // Only clear if this character is currently the one talking
+      if (talkingIdx === idx) {
+        talkingIdx = -1;
+        bubbleText = '';
+      }
     },
     setMouth(ry) {
       mouthRy = ry;
@@ -1424,7 +1427,7 @@ function setIdle(idx) {
   if (idle) idle.style.display = '';
   if (talk) { talk.setAttribute('ry', '0'); talk.style.opacity = '0'; }
 
-  RC.setIdle();
+  RC.setIdle(idx);
 }
 
 function showBubble(idx, text) {

@@ -742,6 +742,7 @@
         </div>
 
       </div>
+      <canvas id="record-canvas" width="800" height="500" style="position:absolute;inset:0;width:100%;height:100%;display:none;z-index:50;pointer-events:none"></canvas>
     </div>
 
     <div class="stage-footer">
@@ -817,9 +818,6 @@
   </div>
 
 </div>
-
-<!-- Hidden canvas for recording -->
-<canvas id="record-canvas" width="800" height="500" style="position:fixed;top:-9999px;left:-9999px;pointer-events:none"></canvas>
 
 <script>
 // ── Canvas Renderer (RC) ──────────────────────────────────────────────────────
@@ -1514,8 +1512,11 @@ function downloadBlob(blob, filename) {
 async function toggleRecording() {
   if (isRecording) { finishRecording(); return; }
 
+  // Show canvas overlay so Chrome definitely renders it (off-screen canvases may not be rendered)
+  const recCanvas = document.getElementById('record-canvas');
+  recCanvas.style.display = 'block';
   RC.start();
-  const canvasStream = document.getElementById('record-canvas').captureStream(30);
+  const canvasStream = recCanvas.captureStream(30);
 
   // Capture tab audio — user must pick this tab and check "Share tab audio"
   let audioTracks = [];
@@ -1554,6 +1555,7 @@ async function toggleRecording() {
   mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
   mediaRecorder.onstop = () => {
     RC.stop();
+    document.getElementById('record-canvas').style.display = 'none';
     audioTracks.forEach(t => t.stop());
     // Always name .mov — MP4-encoded files open in QuickTime; WebM-encoded
     // files open in Chrome/Firefox/VLC if QuickTime doesn't recognise them.
@@ -1580,6 +1582,7 @@ async function toggleRecording() {
 function finishRecording() {
   isRecording = false;
   if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+  document.getElementById('record-canvas').style.display = 'none';
   const btn = document.getElementById('btn-record');
   btn.classList.remove('recording');
   btn.innerHTML = '<span class="rec-dot"></span> Record Video (.mov)';

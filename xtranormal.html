@@ -1576,57 +1576,62 @@ async function patchMp4Duration(chunks, mimeType, durationMs) {
 let recAudioCtx = null;
 let recAudioDest = null;
 
+let recMasterComp = null;
+
 function startRecordAudio() {
   recAudioCtx = new AudioContext();
   recAudioDest = recAudioCtx.createMediaStreamDestination();
+  // Single compressor shared by all voice nodes — prevents clipping when lines overlap
+  recMasterComp = recAudioCtx.createDynamicsCompressor();
+  recMasterComp.threshold.value = -18;
+  recMasterComp.knee.value = 6;
+  recMasterComp.ratio.value = 8;
+  recMasterComp.attack.value = 0.003;
+  recMasterComp.release.value = 0.15;
+  recMasterComp.connect(recAudioDest);
 }
 
 function stopRecordAudio() {
-  if (recAudioCtx) { recAudioCtx.close(); recAudioCtx = null; recAudioDest = null; }
+  if (recAudioCtx) { recAudioCtx.close(); recAudioCtx = null; recAudioDest = null; recMasterComp = null; }
 }
 
 function synthesizeVoice(text, charIdx, durationSec) {
-  if (!recAudioCtx || !recAudioDest) return;
-  const baseFreq = charIdx === 0 ? 110 : 200; // male / female fundamental
+  if (!recAudioCtx || !recMasterComp) return;
+  // Char 0 = lower male-ish tone, char 1 = higher female-ish tone
+  const baseFreq = charIdx === 0 ? 130 : 220;
   const words = text.trim().split(/\s+/).filter(Boolean);
   const wordDur = durationSec / Math.max(words.length, 1);
   const now = recAudioCtx.currentTime;
 
-  const osc  = recAudioCtx.createOscillator();
-  const filt = recAudioCtx.createBiquadFilter();
-  const gain = recAudioCtx.createGain();
+  // Two sine oscillators slightly detuned = smoother tone than sawtooth
+  [0, 1].forEach(h => {
+    const osc  = recAudioCtx.createOscillator();
+    const filt = recAudioCtx.createBiquadFilter();
+    const gain = recAudioCtx.createGain();
 
-  osc.type = 'sawtooth';
-  osc.frequency.value = baseFreq;
-  // Add subtle pitch wobble for a more voice-like feel
-  const lfo = recAudioCtx.createOscillator();
-  const lfoGain = recAudioCtx.createGain();
-  lfo.frequency.value = 5.5;
-  lfoGain.gain.value = 3;
-  lfo.connect(lfoGain);
-  lfoGain.connect(osc.frequency);
-  lfo.start(now);
+    osc.type = 'sine';
+    osc.frequency.value = baseFreq * (h === 0 ? 1 : 2.01); // fundamental + slightly-sharp 2nd harmonic
 
-  filt.type = 'bandpass';
-  filt.frequency.value = baseFreq * 4;
-  filt.Q.value = 1.8;
+    filt.type = 'lowpass';
+    filt.frequency.value = baseFreq * 6;
+    filt.Q.value = 0.7;
 
-  osc.connect(filt);
-  filt.connect(gain);
-  gain.connect(recAudioDest);
+    osc.connect(filt);
+    filt.connect(gain);
+    gain.connect(recMasterComp);
 
-  // Syllable-like amplitude envelope — one burst per word
-  gain.gain.setValueAtTime(0, now);
-  words.forEach((_, i) => {
-    const t = now + i * wordDur;
-    gain.gain.linearRampToValueAtTime(0.35, t + 0.04);
-    gain.gain.setValueAtTime(0.28, t + wordDur * 0.55);
-    gain.gain.linearRampToValueAtTime(0, t + wordDur * 0.92);
+    // Per-word syllable bursts — short attack, natural decay
+    gain.gain.setValueAtTime(0, now);
+    words.forEach((_, i) => {
+      const t = now + i * wordDur;
+      gain.gain.linearRampToValueAtTime(h === 0 ? 0.22 : 0.12, t + 0.03);
+      gain.gain.setValueAtTime(h === 0 ? 0.18 : 0.10, t + wordDur * 0.5);
+      gain.gain.linearRampToValueAtTime(0, t + wordDur * 0.88);
+    });
+
+    osc.start(now);
+    osc.stop(now + durationSec + 0.1);
   });
-
-  osc.start(now);
-  lfo.stop(now + durationSec + 0.15);
-  osc.stop(now + durationSec + 0.15);
 }
 
 function toggleRecording() {

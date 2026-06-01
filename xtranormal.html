@@ -1582,70 +1582,86 @@ function startRecordAudio() {
   recAudioCtx = new AudioContext();
   recAudioDest = recAudioCtx.createMediaStreamDestination();
   recMasterComp = recAudioCtx.createDynamicsCompressor();
-  recMasterComp.threshold.value = -18;
-  recMasterComp.knee.value = 6;
-  recMasterComp.ratio.value = 8;
-  recMasterComp.attack.value = 0.003;
-  recMasterComp.release.value = 0.15;
+  recMasterComp.threshold.value = -14;
+  recMasterComp.knee.value = 4;
+  recMasterComp.ratio.value = 6;
+  recMasterComp.attack.value = 0.002;
+  recMasterComp.release.value = 0.1;
   recMasterComp.connect(recAudioDest);
 
-  // Keep the audio track "alive" from frame 0 — without this Chrome may mark
-  // the track silent before any speech plays and drop audio from the recording
-  const keepAlive = recAudioCtx.createConstantSource();
-  const keepGain = recAudioCtx.createGain();
-  keepGain.gain.value = 0.0001; // inaudible but non-zero
-  keepAlive.connect(keepGain);
-  keepGain.connect(recAudioDest);
-  keepAlive.start();
-  // stored so we can stop it on cleanup
-  recAudioCtx._keepAlive = keepAlive;
+  // Audible "bloop" at t=0 confirms audio capture is working before any speech
+  playBloop(recAudioCtx.currentTime);
 }
 
 function stopRecordAudio() {
   if (recAudioCtx) { recAudioCtx.close(); recAudioCtx = null; recAudioDest = null; recMasterComp = null; }
 }
 
+function playBloop(t) {
+  if (!recAudioCtx || !recMasterComp) return;
+  [440, 660].forEach((freq, i) => {
+    const osc = recAudioCtx.createOscillator();
+    const g   = recAudioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    g.gain.setValueAtTime(0, t + i * 0.12);
+    g.gain.linearRampToValueAtTime(0.4, t + i * 0.12 + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.12 + 0.18);
+    osc.connect(g); g.connect(recMasterComp);
+    osc.start(t + i * 0.12);
+    osc.stop(t + i * 0.12 + 0.2);
+  });
+}
+
 function synthesizeVoice(text, charIdx, durationSec) {
   if (!recAudioCtx || !recMasterComp) return;
-  const baseFreq = charIdx === 0 ? 100 : 170; // lower=male, higher=female
+  // Pitch: char 0 male ~100 Hz, char 1 female ~170 Hz
+  const pitch = charIdx === 0 ? 100 : 170;
   const words = text.trim().split(/\s+/).filter(Boolean);
   const wordDur = durationSec / Math.max(words.length, 1);
   const now = recAudioCtx.currentTime;
 
-  const osc  = recAudioCtx.createOscillator();
-  const filt = recAudioCtx.createBiquadFilter();
-  const gain = recAudioCtx.createGain();
-
-  // Sawtooth has natural harmonics that sound speech-like (vs sine = horn)
-  osc.type = 'sawtooth';
-
-  // Vary pitch slightly per word — simulates natural speech intonation
+  // Sawtooth source — rich harmonic series mimics vocal cords
+  const src = recAudioCtx.createOscillator();
+  src.type = 'sawtooth';
   const pitchSteps = [1, 1.07, 0.96, 1.04, 0.93, 1.10, 0.98];
-  osc.frequency.setValueAtTime(baseFreq, now);
+  src.frequency.setValueAtTime(pitch, now);
   words.forEach((_, i) => {
-    osc.frequency.setValueAtTime(baseFreq * pitchSteps[i % pitchSteps.length], now + i * wordDur);
+    src.frequency.setValueAtTime(pitch * pitchSteps[i % pitchSteps.length], now + i * wordDur);
   });
 
-  // Lowpass cuts the harshest sawtooth highs while keeping voice-like mids
-  filt.type = 'lowpass';
-  filt.frequency.value = 2400;
-  filt.Q.value = 0.8;
+  // Three parallel formant (bandpass) filters = vocal tract resonances.
+  // Without formants, sawtooth just sounds like a buzz; formants make it voice-like.
+  const formants = charIdx === 0
+    ? [{ f: 650, q: 9 }, { f: 1100, q: 11 }, { f: 2500, q: 13 }]  // male 'ah'
+    : [{ f: 700, q: 9 }, { f: 2100, q: 11 }, { f: 2900, q: 13 }]; // female 'ah'
 
-  osc.connect(filt);
-  filt.connect(gain);
-  gain.connect(recMasterComp);
+  const masterGain = recAudioCtx.createGain();
+  masterGain.connect(recMasterComp);
 
-  // Sharp per-word bursts with clear silence between = recognizable as "talking"
-  gain.gain.setValueAtTime(0, now);
+  // Per-word amplitude envelope — sharp on/off between words
+  masterGain.gain.setValueAtTime(0, now);
   words.forEach((_, i) => {
     const t = now + i * wordDur;
-    gain.gain.linearRampToValueAtTime(0.38, t + 0.025);
-    gain.gain.setValueAtTime(0.32, t + wordDur * 0.45);
-    gain.gain.linearRampToValueAtTime(0, t + wordDur * 0.80);
+    masterGain.gain.linearRampToValueAtTime(0.28, t + 0.03);
+    masterGain.gain.setValueAtTime(0.22, t + wordDur * 0.5);
+    masterGain.gain.linearRampToValueAtTime(0, t + wordDur * 0.82);
   });
 
-  osc.start(now);
-  osc.stop(now + durationSec + 0.1);
+  formants.forEach(({ f, q }) => {
+    const bp = recAudioCtx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = f;
+    bp.Q.value = q;
+    const fg = recAudioCtx.createGain();
+    fg.gain.value = 1 / formants.length;
+    src.connect(bp);
+    bp.connect(fg);
+    fg.connect(masterGain);
+  });
+
+  src.start(now);
+  src.stop(now + durationSec + 0.15);
 }
 
 function toggleRecording() {

@@ -1360,6 +1360,11 @@ function speakNext() {
   };
 
   speechSynthesis.speak(utt);
+
+  if (isRecording) {
+    const estimatedDuration = Math.max(1, text.split(/\s+/).length * 0.4) + 0.3;
+    synthesizeVoice(text, idx, estimatedDuration);
+  }
 }
 
 // ── UI ────────────────────────────────────────────────────────────────────────
@@ -1565,66 +1570,103 @@ async function patchMp4Duration(chunks, mimeType, durationMs) {
   return new Blob([buf], { type: mimeType });
 }
 
-async function toggleRecording() {
+// Web Audio synthesizer — routes character voices into the recording stream.
+// speechSynthesis bypasses the browser audio pipeline so can't be captured;
+// this oscillator-based synth goes through AudioContext and is always capturable.
+let recAudioCtx = null;
+let recAudioDest = null;
+
+function startRecordAudio() {
+  recAudioCtx = new AudioContext();
+  recAudioDest = recAudioCtx.createMediaStreamDestination();
+}
+
+function stopRecordAudio() {
+  if (recAudioCtx) { recAudioCtx.close(); recAudioCtx = null; recAudioDest = null; }
+}
+
+function synthesizeVoice(text, charIdx, durationSec) {
+  if (!recAudioCtx || !recAudioDest) return;
+  const baseFreq = charIdx === 0 ? 110 : 200; // male / female fundamental
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  const wordDur = durationSec / Math.max(words.length, 1);
+  const now = recAudioCtx.currentTime;
+
+  const osc  = recAudioCtx.createOscillator();
+  const filt = recAudioCtx.createBiquadFilter();
+  const gain = recAudioCtx.createGain();
+
+  osc.type = 'sawtooth';
+  osc.frequency.value = baseFreq;
+  // Add subtle pitch wobble for a more voice-like feel
+  const lfo = recAudioCtx.createOscillator();
+  const lfoGain = recAudioCtx.createGain();
+  lfo.frequency.value = 5.5;
+  lfoGain.gain.value = 3;
+  lfo.connect(lfoGain);
+  lfoGain.connect(osc.frequency);
+  lfo.start(now);
+
+  filt.type = 'bandpass';
+  filt.frequency.value = baseFreq * 4;
+  filt.Q.value = 1.8;
+
+  osc.connect(filt);
+  filt.connect(gain);
+  gain.connect(recAudioDest);
+
+  // Syllable-like amplitude envelope — one burst per word
+  gain.gain.setValueAtTime(0, now);
+  words.forEach((_, i) => {
+    const t = now + i * wordDur;
+    gain.gain.linearRampToValueAtTime(0.35, t + 0.04);
+    gain.gain.setValueAtTime(0.28, t + wordDur * 0.55);
+    gain.gain.linearRampToValueAtTime(0, t + wordDur * 0.92);
+  });
+
+  osc.start(now);
+  lfo.stop(now + durationSec + 0.15);
+  osc.stop(now + durationSec + 0.15);
+}
+
+function toggleRecording() {
   if (isRecording) { finishRecording(); return; }
 
   const recCanvas = document.getElementById('record-canvas');
-  recCanvas.style.display = 'block';
   RC.start();
+  startRecordAudio();
   const canvasStream = recCanvas.captureStream(30);
+  const audioStream = recAudioDest.stream;
 
-  // speechSynthesis routes through the OS TTS engine and bypasses the browser's
-  // Web Audio pipeline — getDisplayMedia tab audio can never capture it.
-  // getUserMedia (microphone) is the only browser-native way to capture TTS:
-  // the mic picks up the speech playing from the speakers.
-  let audioTracks = [];
-  setRecordStatus('Allow microphone access → the mic will capture the voice audio from your speakers');
-  try {
-    const micStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
-    });
-    audioTracks = micStream.getAudioTracks();
-    setRecordStatus('🎙️ Mic ready — make sure audio plays through SPEAKERS, not headphones');
-    await new Promise(r => setTimeout(r, 1200));
-  } catch (e) {
-    setRecordStatus('No mic access — recording video only');
-    await new Promise(r => setTimeout(r, 1000));
-  }
-
-  // Try to get a real MP4 codec; always save as .mov regardless
   const mimeType = pickMime([
     'video/mp4;codecs=h264,aac',
     'video/mp4;codecs=avc1,mp4a.40.2',
-    'video/mp4;codecs=avc1',
     'video/mp4',
-    'video/webm;codecs=h264,opus',
     'video/webm;codecs=vp9,opus',
-    'video/webm;codecs=vp8,opus',
     'video/webm'
   ]);
 
-  const combined = new MediaStream([...canvasStream.getVideoTracks(), ...audioTracks]);
+  const combined = new MediaStream([
+    ...canvasStream.getVideoTracks(),
+    ...audioStream.getAudioTracks()
+  ]);
   mediaRecorder = new MediaRecorder(combined, { mimeType });
   recordedChunks = [];
   mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
   mediaRecorder.onstop = async () => {
     RC.stop();
-    document.getElementById('record-canvas').style.display = 'none';
-    audioTracks.forEach(t => t.stop());
+    stopRecordAudio();
     try {
       const durationMs = performance.now() - recordingStartTime;
-      const hasAudio = audioTracks.length > 0;
       setRecordStatus('Processing…');
       const blob = await patchMp4Duration(recordedChunks, mimeType, durationMs);
-      // Show a persistent download button — programmatic clicks are blocked
-      // by popup blockers when not triggered by a direct user gesture.
       const url = URL.createObjectURL(blob);
       const rs = document.getElementById('record-status');
       rs.innerHTML = '';
       const a = document.createElement('a');
       a.href = url;
       a.download = 'sceneforge-movie.mov';
-      a.textContent = '⬇ Download sceneforge-movie.mov' + (hasAudio ? ' (with audio)' : '');
+      a.textContent = '⬇ Click to download sceneforge-movie.mov';
       a.style.cssText = 'color:#4f8ef7;font-weight:700;text-decoration:underline;cursor:pointer;font-size:12px;';
       a.onclick = () => setTimeout(() => { URL.revokeObjectURL(url); rs.textContent = '✅ Downloaded!'; }, 1000);
       rs.appendChild(a);
@@ -1640,7 +1682,7 @@ async function toggleRecording() {
   const btn = document.getElementById('btn-record');
   btn.classList.add('recording');
   btn.innerHTML = '<span class="rec-dot"></span> Stop & Save Early';
-  setRecordStatus('🔴 Recording' + (audioTracks.length ? ' with audio ✓' : ' — video only') + ' · auto-saves when scene ends');
+  setRecordStatus('🔴 Recording with audio ✓ · auto-saves when scene ends');
 
   // Auto-start playback
   handleStop();

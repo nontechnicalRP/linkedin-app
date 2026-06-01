@@ -1597,41 +1597,45 @@ function stopRecordAudio() {
 
 function synthesizeVoice(text, charIdx, durationSec) {
   if (!recAudioCtx || !recMasterComp) return;
-  // Char 0 = lower male-ish tone, char 1 = higher female-ish tone
-  const baseFreq = charIdx === 0 ? 130 : 220;
+  const baseFreq = charIdx === 0 ? 100 : 170; // lower=male, higher=female
   const words = text.trim().split(/\s+/).filter(Boolean);
   const wordDur = durationSec / Math.max(words.length, 1);
   const now = recAudioCtx.currentTime;
 
-  // Two sine oscillators slightly detuned = smoother tone than sawtooth
-  [0, 1].forEach(h => {
-    const osc  = recAudioCtx.createOscillator();
-    const filt = recAudioCtx.createBiquadFilter();
-    const gain = recAudioCtx.createGain();
+  const osc  = recAudioCtx.createOscillator();
+  const filt = recAudioCtx.createBiquadFilter();
+  const gain = recAudioCtx.createGain();
 
-    osc.type = 'sine';
-    osc.frequency.value = baseFreq * (h === 0 ? 1 : 2.01); // fundamental + slightly-sharp 2nd harmonic
+  // Sawtooth has natural harmonics that sound speech-like (vs sine = horn)
+  osc.type = 'sawtooth';
 
-    filt.type = 'lowpass';
-    filt.frequency.value = baseFreq * 6;
-    filt.Q.value = 0.7;
-
-    osc.connect(filt);
-    filt.connect(gain);
-    gain.connect(recMasterComp);
-
-    // Per-word syllable bursts — short attack, natural decay
-    gain.gain.setValueAtTime(0, now);
-    words.forEach((_, i) => {
-      const t = now + i * wordDur;
-      gain.gain.linearRampToValueAtTime(h === 0 ? 0.22 : 0.12, t + 0.03);
-      gain.gain.setValueAtTime(h === 0 ? 0.18 : 0.10, t + wordDur * 0.5);
-      gain.gain.linearRampToValueAtTime(0, t + wordDur * 0.88);
-    });
-
-    osc.start(now);
-    osc.stop(now + durationSec + 0.1);
+  // Vary pitch slightly per word — simulates natural speech intonation
+  const pitchSteps = [1, 1.07, 0.96, 1.04, 0.93, 1.10, 0.98];
+  osc.frequency.setValueAtTime(baseFreq, now);
+  words.forEach((_, i) => {
+    osc.frequency.setValueAtTime(baseFreq * pitchSteps[i % pitchSteps.length], now + i * wordDur);
   });
+
+  // Lowpass cuts the harshest sawtooth highs while keeping voice-like mids
+  filt.type = 'lowpass';
+  filt.frequency.value = 2400;
+  filt.Q.value = 0.8;
+
+  osc.connect(filt);
+  filt.connect(gain);
+  gain.connect(recMasterComp);
+
+  // Sharp per-word bursts with clear silence between = recognizable as "talking"
+  gain.gain.setValueAtTime(0, now);
+  words.forEach((_, i) => {
+    const t = now + i * wordDur;
+    gain.gain.linearRampToValueAtTime(0.38, t + 0.025);
+    gain.gain.setValueAtTime(0.32, t + wordDur * 0.45);
+    gain.gain.linearRampToValueAtTime(0, t + wordDur * 0.80);
+  });
+
+  osc.start(now);
+  osc.stop(now + durationSec + 0.1);
 }
 
 function toggleRecording() {

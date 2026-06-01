@@ -1650,7 +1650,7 @@ function synthesizeVoice(text, charIdx, durationSec) {
   });
 }
 
-let usingTabAudio = false; // true when real TTS audio captured via getDisplayMedia
+let usingTabAudio = false;
 
 async function toggleRecording() {
   if (isRecording) { finishRecording(); return; }
@@ -1666,37 +1666,33 @@ async function toggleRecording() {
   ]);
   const fileExt = mimeType.startsWith('video/webm') ? 'webm' : 'mov';
 
-  // ── Try to capture real TTS voices via tab audio ──────────────────────────
-  let tabAudioTrack = null;
+  // ── Try microphone capture — mic picks up TTS voices from speakers ─────────
+  // echoCancellation:false ensures the speaker audio isn't suppressed
+  let micTrack = null;
   usingTabAudio = false;
   try {
-    setRecordStatus('📋 Select THIS TAB in the dialog and check "Share tab audio" to capture voices…');
-    const displayStream = await navigator.mediaDevices.getDisplayMedia({
-      video: true,  // Chrome requires video:true
-      audio: { echoCancellation: false, noiseSuppression: false, sampleRate: 48000 },
-      preferCurrentTab: true  // Chrome 107+: pre-selects current tab
+    setRecordStatus('🎤 Allow microphone access to capture character voices…');
+    const micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
     });
-    // Stop the screen video track — we use canvas for video
-    displayStream.getVideoTracks().forEach(t => t.stop());
-    tabAudioTrack = displayStream.getAudioTracks()[0] || null;
-    if (tabAudioTrack) usingTabAudio = true;
+    micTrack = micStream.getAudioTracks()[0] || null;
+    if (micTrack) usingTabAudio = true; // reuse flag: real audio captured
   } catch (e) {
-    // User cancelled or browser doesn't support — fall through to synth
+    // Mic denied — fall back to Web Audio synthesis
   }
 
-  // ── Set up Web Audio synthesis (used if no tab audio, or as fallback) ─────
-  startRecordAudio();
+  startRecordAudio(); // always init for synthesis fallback path
 
   RC.start();
   const canvasStream = recCanvas.captureStream(30);
-  const audioTrack = usingTabAudio ? tabAudioTrack : recAudioDest.stream.getAudioTracks()[0];
+  const audioTrack = micTrack || recAudioDest.stream.getAudioTracks()[0];
 
   const recStream = new MediaStream([
     ...canvasStream.getVideoTracks(),
     ...(audioTrack ? [audioTrack] : [])
   ]);
 
-  const audioDesc = usingTabAudio ? 'real voices ✓' : (audioTrack ? 'synth audio ✓' : 'video only');
+  const audioDesc = micTrack ? 'mic voices ✓' : (audioTrack ? 'synth audio ✓' : 'video only');
   setRecordStatus(`🔴 Recording · ${audioDesc}`);
 
   mediaRecorder = new MediaRecorder(recStream, { mimeType });
